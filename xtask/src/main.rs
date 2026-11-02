@@ -80,7 +80,10 @@ fn main() -> Result<()> {
         Cmd::Models => models::run(&m),
         Cmd::Pin => pin::run(),
         Cmd::Gate { ffmpeg, target } => gate::check(&m.ffmpeg.gate, &ffmpeg, &target.resolve()?),
-        Cmd::GenTypes => util::cargo(&["test", "--quiet", "-p", "fs-types", "export_bindings"]),
+        Cmd::GenTypes => {
+            util::cargo(&["test", "--quiet", "-p", "fs-types", "export_bindings"])?;
+            util::write_types_index()
+        }
         Cmd::Doctor => util::doctor(),
     }
 }

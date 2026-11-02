@@ -12,11 +12,17 @@ name = "fs-worker"
 path = "src/main.rs"
 
 [dependencies]
-fs-types   = { workspace = true }
-fs-engine  = { workspace = true }
-fs-media   = { workspace = true }
-fs-proc    = { workspace = true }
-fs-license = { workspace = true }
+fs-types          = { workspace = true }
+fs-engine         = { workspace = true }
+fs-media          = { workspace = true }
+fs-proc           = { workspace = true }
+fs-license        = { workspace = true }
+fs-hw             = { workspace = true }
+serde_json        = { workspace = true }
+crossbeam-channel = { workspace = true }
+
+[dev-dependencies]
+fs-media = { workspace = true }
 
 [lints]
 workspace = true

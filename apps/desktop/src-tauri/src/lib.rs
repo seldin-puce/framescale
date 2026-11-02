@@ -5,6 +5,13 @@
 //! the `fs://` preview protocol, and the supervisor.
 #![deny(unsafe_code)]
 
+mod commands;
+mod paths;
+mod queue;
+mod settings;
+mod state;
+mod telemetry;
+
 use tauri::{Manager, WebviewWindowBuilder};
 
 /// Label of the single main window; must match `app.windows[0].label`
@@ -29,9 +36,38 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // Windows: tie every descendant process to our lifetime (zombie reaper).
+            if let Err(e) = fs_proc::install_kill_on_close_job() {
+                tracing::error!(error = %e, "could not create the kill-on-close job object");
+            }
+            let paths = paths::Paths::resolve(app.handle())?;
+            let state = state::AppState::init(paths)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            app.manage(state.clone());
+            tauri::async_runtime::spawn(state.clone().init_background());
+            tauri::async_runtime::spawn(queue::run(state.clone()));
+            tauri::async_runtime::spawn(telemetry::run(state));
             create_main_window(app)?;
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            commands::hardware_info,
+            commands::set_preferred_device,
+            commands::probe_media,
+            commands::enqueue_jobs,
+            commands::list_jobs,
+            commands::pause_job,
+            commands::resume_job,
+            commands::cancel_job,
+            commands::remove_job,
+            commands::reorder_jobs,
+            commands::get_license,
+            commands::activate_license,
+            commands::set_eco_mode,
+            commands::disk_free,
+            commands::subscribe_jobs,
+            commands::subscribe_telemetry,
+        ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
             tracing::error!(error = %e, "fatal: tauri runtime failed");

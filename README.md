@@ -31,6 +31,7 @@ framescale/
 │   ├── fs-proc                 Job Objects / process groups / reaper
 │   ├── fs-license              Ed25519 entitlements (linked into host AND worker)
 │   ├── fs-journal              SQLite WAL journal (+ migrations/)
+│   ├── fs-core                 job runner: analyze → plan → supervised render → concat → mux; recovery policy
 │   ├── fs-engine               InferenceBackend, ncnn bridge (cpp/), tiler
 │   └── fs-worker               sidecar binary: decode pipe → GPU → segmented encode
 │

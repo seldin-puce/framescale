@@ -1,16 +1,30 @@
 //! Shared domain model and IPC contract types.
 //!
-//! Every type that crosses a process boundary lives here: UI ⇄ core (Tauri IPC)
-//! and core ⇄ fs-worker (JSON-lines over stdio). Types derive `serde` and
-//! `ts_rs::TS`; `cargo xtask gen-types` exports them to
-//! `packages/ipc-types/src/generated`, and CI fails on drift.
-//!
-//! Planned modules (Phase 3):
-//! - `media`    — `MediaInfo`, `ColorProfile` (primaries/trc/matrix/range, HDR side data)
-//! - `pipeline` — `StageKind` (canonical order), `StageConfig`, `PipelinePlan`
-//! - `job`      — `JobId`, `JobSpec`, `JobState`, `SegmentRecord`, `PauseMode`
-//! - `device`   — `GpuDevice`, `DeviceUuid`, `BackendKind`, `Capabilities`
-//! - `event`    — `JobEvent`, `Telemetry`, worker protocol messages
-//! - `license`  — `Entitlements`, `Feature`
-
+//! Every type that crosses a process boundary lives here: UI ⇄ core (Tauri IPC,
+//! camelCase JSON) and core ⇄ fs-worker (JSON lines over stdio). Types derive
+//! `ts_rs::TS`. `cargo xtask gen-types` exports them to
+//! `packages/ipc-types/src/generated`, and CI fails if the output drifts.
 #![forbid(unsafe_code)]
+
+pub mod device;
+pub mod job;
+pub mod license;
+pub mod media;
+pub mod pipeline;
+pub mod telemetry;
+pub mod worker;
+
+pub use device::{DeviceKind, DeviceUuid, GpuDevice, Vendor};
+pub use job::{
+    FailureKind, JobEvent, JobId, JobProgress, JobState, JobSummary, PauseMode, WarningCode,
+};
+pub use license::{Entitlements, Feature, Tier};
+pub use media::{
+    AnalysisReport, ColorPrimaries, ColorProfile, ColorRange, ContentLightLevel, FieldOrder,
+    MasteringDisplay, MatrixCoefficients, MediaInfo, Rational, TransferCharacteristic, VideoStream,
+};
+pub use pipeline::{
+    Container, EncoderPreference, JobSpec, ModelRef, OutputSpec, PipelineError, PipelineSpec,
+    StageConfig, StageKind, VideoCodec,
+};
+pub use telemetry::{DeviceTelemetry, EcoMode, EcoState, Telemetry};

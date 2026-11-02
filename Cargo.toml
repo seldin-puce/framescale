@@ -31,6 +31,7 @@ fs-proc    = { path = "crates/fs-proc" }
 fs-license = { path = "crates/fs-license" }
 fs-journal = { path = "crates/fs-journal" }
 fs-engine  = { path = "crates/fs-engine" }
+fs-core    = { path = "crates/fs-core" }
 
 # --- tauri --------------------------------------------------------------------
 tauri                        = { version = "2.12.5", features = ["macos-private-api"] }

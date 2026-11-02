@@ -1,6 +1,6 @@
 [package]
 name = "fs-proc"
-description = "Process supervision and the zombie reaper."
+description = "Process supervision and the zombie reaper: Job Objects, process groups, PID ledger."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,16 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-fs-types = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+sysinfo    = { workspace = true }
+tracing    = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [lints]
 workspace = true

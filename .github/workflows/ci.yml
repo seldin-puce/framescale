@@ -69,6 +69,7 @@ jobs:
         run: git diff --exit-code packages/ipc-types/src/generated
 
   ffmpeg-gate:
+    name: ffmpeg gate + integration
     # Verifies the pinned FFmpeg builds stay LGPL and keep every filter/encoder
     # the pipeline needs. Runs on the hosts that can execute them.
     strategy:
@@ -86,3 +87,14 @@ jobs:
           path: .cache/downloads
           key: downloads-${{ hashFiles('third_party/manifest.toml') }}
       - run: cargo xtask sidecars --target ${{ matrix.target }}
+      # Integration tests against the real pinned FFmpeg + fs-worker binary:
+      # probe/analyze/seek exactness, HDR passthrough, bit-exact resume, full job.
+      - name: Integration tests
+        shell: bash
+        run: |
+          EXE=$([ "$RUNNER_OS" = Windows ] && echo .exe || true)
+          cargo build -p fs-worker
+          export FS_FFMPEG="$PWD/apps/desktop/src-tauri/binaries/ffmpeg-${{ matrix.target }}$EXE"
+          export FS_FFPROBE="$PWD/apps/desktop/src-tauri/binaries/ffprobe-${{ matrix.target }}$EXE"
+          export FS_WORKER="$PWD/target/debug/fs-worker$EXE"
+          cargo test -p fs-media -p fs-worker -p fs-core

@@ -1,0 +1,25 @@
+[package]
+name = "fs-core"
+description = "Job orchestration: analyze → plan → supervised render → concat → mux, with recovery policy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fs-types   = { workspace = true }
+fs-media   = { workspace = true }
+fs-journal = { workspace = true }
+fs-proc    = { workspace = true }
+fs-hw      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true
