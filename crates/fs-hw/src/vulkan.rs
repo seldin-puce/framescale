@@ -197,6 +197,8 @@ impl VulkanContext {
             uuid: DeviceUuid(id.device_uuid),
             name: cstr_field(&props.device_name),
             vendor,
+            pci_vendor_id: props.vendor_id,
+            pci_device_id: props.device_id,
             kind,
             driver_name: if has_driver_props {
                 cstr_field(&driver.driver_name)

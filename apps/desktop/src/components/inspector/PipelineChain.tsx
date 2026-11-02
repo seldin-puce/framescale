@@ -2,8 +2,9 @@ import type { StageKind } from "@framescale/ipc-types";
 import { Blend, ImageUpscale, Layers, ScanFace, Waves } from "lucide-react";
 import { Fragment } from "react";
 import { cn } from "@/lib/cn";
-import { STAGE_ORDER, stageFeature, useApp } from "@/stores/app";
+import { COMING_SOON, STAGE_ORDER, stageFeature, useApp } from "@/stores/app";
 import { ProBadge } from "../ui/ProBadge";
+import { Tooltip } from "../ui/Tooltip";
 
 export const STAGE_META: Record<StageKind, { label: string; icon: typeof Layers; hint: string }> = {
   deinterlace: { label: "Deinterlace", icon: Layers, hint: "BWDIF" },
@@ -29,6 +30,7 @@ export function PipelineChain() {
         const meta = STAGE_META[kind];
         const feature = kind === "faceFix" ? "faceFix" : null;
         const locked = feature != null && !has(feature);
+        const soon = COMING_SOON.has(kind);
         const Icon = meta.icon;
         const detail =
           kind === "upscale" ? `×${s.scale}` : kind === "interpolate" ? `×${s.factor}` : kind === "denoise" ? `L${s.strength}` : "";
@@ -42,12 +44,12 @@ export function PipelineChain() {
                 className={cn(
                   "group flex items-center gap-2 rounded-sm px-1.5 py-1.5 ring-1 transition-colors",
                   selectedStage === kind ? "bg-accent/10 ring-accent/40" : "ring-transparent hover:bg-white/4",
-                  locked && "opacity-60",
+                  (locked || soon) && "opacity-60",
                 )}
               >
                 <button
                   type="button"
-                  onClick={() => (locked ? openPro("faceFix") : selectStage(kind))}
+                  onClick={() => (locked && !soon ? openPro("faceFix") : selectStage(kind))}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
                   aria-current={selectedStage === kind}
                 >
@@ -65,7 +67,13 @@ export function PipelineChain() {
                   </span>
                 </button>
                 {detail && s.enabled && <span className="tabular font-mono text-[11px] text-fg-muted">{detail}</span>}
-                {locked ? (
+                {COMING_SOON.has(kind) ? (
+                  <Tooltip label="This stage's model runtime ships in an upcoming update.">
+                    <span className="rounded-[4px] bg-white/6 px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-fg-subtle uppercase ring-1 ring-border">
+                      Soon
+                    </span>
+                  </Tooltip>
+                ) : locked ? (
                   <button type="button" onClick={() => openPro("faceFix")} aria-label="Face Fix requires Pro">
                     <ProBadge />
                   </button>

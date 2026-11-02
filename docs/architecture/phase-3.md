@@ -13,6 +13,25 @@
 | UI (b) split-screen compare slider | `src/gl/compare.ts`, `components/viewport/CompareStage.tsx` | Dragged + zoomed to 1488 % in a real browser (nearest-neighbour pixel peeping) |
 | UI (c) telemetry HUD | `components/telemetry/TelemetryHUD.tsx`, `stores/telemetry.ts` | Live demo telemetry; 4 Hz render cap; canvas sparkline |
 
+## Inference (ncnn backend)
+
+- `crates/fs-engine/build.rs` builds the pinned ncnn (`cargo xtask ncnn`) with
+  Vulkan via SimpleVK (no SDK; the loader is dlopen'd) and ncnn's
+  self-contained OpenMP on Linux/macOS. `cpp/bridge.cpp` is a cxx bridge.
+- Models: Real-ESRGAN x4plus / x4plus-anime (native ×4, exact area-downscale to
+  ×2/×3) and AnimeVideo-v3 ×2/×3/×4. RIFE v4.6 runs through our own `rife.Warp`
+  custom layer (CPU bilinear warp; ncnn moves blobs to and from the GPU).
+- Tiling with 10 px context in Rust (`planar::tiled`). It's bit-exact against
+  untiled output for a 1-px-receptive-field model, and ≈0.1/255 mean seam
+  error with the real models.
+- Device mapping: the worker enumerates Vulkan itself (same loader, same order)
+  and cross-checks PCI vendor/device ids against ncnn before trusting an index.
+  CPU-type Vulkan devices (llvmpipe) use ncnn's native CPU path instead.
+- macOS: `@executable_path/../Frameworks/libMoltenVK.dylib` is passed to
+  `create_gpu_instance`. `FS_VULKAN_DRIVER` overrides it anywhere.
+- Verified: real models on ncnn CPU + Vulkan (lavapipe); full 10 s job with
+  real Real-ESRGAN, hard pause and resume: 12 s on 6 CPU cores.
+
 ## Bugs real binaries caught (and the fixes)
 
 1. zimg only outputs planar formats. Requesting `rgb24` made FFmpeg insert swscale
@@ -26,10 +45,12 @@
 
 ## Known open items
 
-- **ncnn inference backend** (`fs-engine/cpp`): the worker currently runs the CPU
-  *reference* backend (nearest-neighbour + blend, clearly labelled non-AI). The
-  `InferenceBackend` trait, tiling/OOM backoff and interpolation scheduling are
-  ready for it.
+- **Denoise (Real-CUGAN)** and **Face Fix (BYOM)**: shown as "Soon"; the host
+  rejects them at enqueue. Real-CUGAN needs its multi-pass cache pipeline.
+- Windows CPU path is single-threaded (MSVC OpenMP needs vcomp140.dll).
+- SR pre/post-processing runs on the CPU (u8/u16 ⇄ f32); GPU shaders for it are an
+  optimisation for later.
+- Not yet measured on real NVIDIA/AMD/Intel/Apple GPUs (CI has none).
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
 - HDR10 *static* metadata on hardware encoders is tags-only (warned in the UI);

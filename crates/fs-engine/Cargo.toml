@@ -6,11 +6,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "build.rs"
+links = "fs_ncnn"
+
+[features]
+# Vulkan/CPU inference via ncnn (built from the pinned source: `cargo xtask ncnn`).
+ncnn = ["dep:cxx", "dep:cxx-build", "dep:cmake"]
 
 [dependencies]
 fs-types    = { workspace = true }
 thiserror   = { workspace = true }
 xxhash-rust = { workspace = true }
+cxx         = { workspace = true, optional = true }
+
+[build-dependencies]
+cxx-build = { workspace = true, optional = true }
+cmake     = { workspace = true, optional = true }
 
 [lints]
 workspace = true

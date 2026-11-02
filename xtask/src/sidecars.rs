@@ -129,6 +129,37 @@ fn ext(file: &str) -> &str {
     file.rsplit('.').next().unwrap_or("gz")
 }
 
+/// Extract the pinned ncnn source tree; returns the directory with `CMakeLists.txt`.
+/// Idempotent: a stamp file records the extracted archive's hash.
+pub fn fetch_ncnn(m: &Manifest) -> Result<PathBuf> {
+    let root = util::cache_dir().join("ncnn");
+    let src = root.join("src");
+    let stamp = root.join("STAMP");
+    if std::fs::read_to_string(&stamp).is_ok_and(|s| s.trim() == m.ncnn.sha256) {
+        return Ok(src);
+    }
+    let zip = fetch::fetch(&m.ncnn)?;
+    let tmp = root.join("extract");
+    archive::extract_all(&zip, &tmp)?;
+    // The archive either has files at its root or one top-level folder.
+    let cmake = if tmp.join("CMakeLists.txt").exists() {
+        tmp.clone()
+    } else {
+        std::fs::read_dir(&tmp)?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.join("CMakeLists.txt").exists() && p.join("src").join("gpu.h").exists())
+            .context("ncnn archive has no top-level CMakeLists.txt")?
+    };
+    if src.exists() {
+        std::fs::remove_dir_all(&src)?;
+    }
+    std::fs::rename(&cmake, &src)?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::write(&stamp, &m.ncnn.sha256)?;
+    Ok(src)
+}
+
 fn install_moltenvk(m: &Manifest) -> Result<()> {
     let tarball = fetch::fetch(&m.moltenvk)?;
     let dest = util::cache_dir().join("moltenvk");

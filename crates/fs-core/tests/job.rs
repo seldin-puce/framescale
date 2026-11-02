@@ -61,7 +61,9 @@ async fn full_job_with_hard_pause_and_resume() {
         ffprobe,
         worker,
         work_root: dir.join("work"),
-        models_dir: dir.join("models"),
+        // The real bundled models: this job runs actual Real-ESRGAN inference.
+        models_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/desktop/src-tauri/resources/models"),
         encoders: EncoderEnv {
             os: Os::current(),
             vendor: None,
@@ -75,7 +77,7 @@ async fn full_job_with_hard_pause_and_resume() {
     });
     let out = dir.join("out.mp4");
     let m = ModelRef {
-        id: "reference".into(),
+        id: "realesr-animevideov3".into(),
         path: None,
     };
     let spec = JobSpec {

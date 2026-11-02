@@ -49,6 +49,12 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: rustup toolchain install   # reads rust-toolchain.toml
       - uses: Swatinem/rust-cache@v2
+      # fs-engine builds ncnn from the pinned, hash-verified source.
+      - uses: actions/cache@v6
+        with:
+          path: .cache/downloads
+          key: downloads-${{ hashFiles('third_party/manifest.toml') }}
+      - run: cargo xtask ncnn
       # tauri-build checks that sidecars and frameworks exist. Lint jobs use stubs.
       - run: cargo xtask sidecars --stub --target ${{ matrix.target }}
       # The frontend dist must exist for tauri::generate_context!().
@@ -86,7 +92,9 @@ jobs:
         with:
           path: .cache/downloads
           key: downloads-${{ hashFiles('third_party/manifest.toml') }}
+      - run: cargo xtask ncnn
       - run: cargo xtask sidecars --target ${{ matrix.target }}
+      - run: cargo xtask models
       # Integration tests against the real pinned FFmpeg + fs-worker binary:
       # probe/analyze/seek exactness, HDR passthrough, bit-exact resume, full job.
       - name: Integration tests
@@ -98,3 +106,4 @@ jobs:
           export FS_FFPROBE="$PWD/apps/desktop/src-tauri/binaries/ffprobe-${{ matrix.target }}$EXE"
           export FS_WORKER="$PWD/target/debug/fs-worker$EXE"
           cargo test -p fs-media -p fs-worker -p fs-core
+          cargo test -p fs-engine --features ncnn --release --test ncnn_models

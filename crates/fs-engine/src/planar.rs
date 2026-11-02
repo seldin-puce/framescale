@@ -1,0 +1,299 @@
+//! Frame ⇄ planar-f32 conversion, seam-free tiling, and area resampling.
+//! Pure Rust, independent of any inference runtime, and unit-tested.
+
+use fs_types::worker::FrameFormat;
+
+use crate::{EngineError, Frame};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+}
+
+/// Planar RGB image, channel-major (`[c][y][x]`), values nominally 0–1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Planar {
+    pub w: usize,
+    pub h: usize,
+    pub data: Vec<f32>,
+}
+
+impl Planar {
+    pub fn zeros(w: usize, h: usize) -> Self {
+        Self {
+            w,
+            h,
+            data: vec![0.0; w * h * 3],
+        }
+    }
+
+    #[inline]
+    pub fn at(&self, c: usize, x: usize, y: usize) -> f32 {
+        self.data[(c * self.h + y) * self.w + x]
+    }
+
+    #[inline]
+    pub fn set(&mut self, c: usize, x: usize, y: usize, v: f32) {
+        self.data[(c * self.h + y) * self.w + x] = v;
+    }
+
+    /// Copy region `[x0, x0+w) × [y0, y0+h)`, replicating edge pixels for
+    /// coordinates outside the image (tile pre-padding at borders).
+    pub fn region(&self, x0: isize, y0: isize, w: usize, h: usize) -> Self {
+        let mut out = Self::zeros(w, h);
+        for c in 0..3 {
+            for y in 0..h {
+                let sy = (y0 + y as isize).clamp(0, self.h as isize - 1) as usize;
+                for x in 0..w {
+                    let sx = (x0 + x as isize).clamp(0, self.w as isize - 1) as usize;
+                    out.set(c, x, y, self.at(c, sx, sy));
+                }
+            }
+        }
+        out
+    }
+
+    /// Paste `src`'s sub-rectangle `r` at `(dx, dy)`.
+    pub fn blit(&mut self, src: &Planar, r: Rect, dx: usize, dy: usize) {
+        for c in 0..3 {
+            for y in 0..r.h {
+                let s = (c * src.h + r.y + y) * src.w + r.x;
+                let d = (c * self.h + dy + y) * self.w + dx;
+                self.data[d..d + r.w].copy_from_slice(&src.data[s..s + r.w]);
+            }
+        }
+    }
+}
+
+pub fn from_frame(f: &Frame) -> Planar {
+    let (w, h) = (f.width as usize, f.height as usize);
+    let mut p = Planar::zeros(w, h);
+    let plane = w * h;
+    let (r, rest) = p.data.split_at_mut(plane);
+    let (g, b) = rest.split_at_mut(plane);
+    match f.format {
+        FrameFormat::Rgb24 => {
+            for (i, px) in f.data.as_chunks::<3>().0.iter().enumerate() {
+                r[i] = f32::from(px[0]) * (1.0 / 255.0);
+                g[i] = f32::from(px[1]) * (1.0 / 255.0);
+                b[i] = f32::from(px[2]) * (1.0 / 255.0);
+            }
+        }
+        FrameFormat::Rgb48 => {
+            let s = |lo: u8, hi: u8| f32::from(u16::from_le_bytes([lo, hi])) * (1.0 / 65535.0);
+            for (i, px) in f.data.as_chunks::<6>().0.iter().enumerate() {
+                r[i] = s(px[0], px[1]);
+                g[i] = s(px[2], px[3]);
+                b[i] = s(px[4], px[5]);
+            }
+        }
+    }
+    p
+}
+
+pub fn to_frame(p: &Planar, format: FrameFormat) -> Frame {
+    let plane = p.w * p.h;
+    let (r, rest) = p.data.split_at(plane);
+    let (g, b) = rest.split_at(plane);
+    let mut data = vec![0u8; format.frame_bytes(p.w as u32, p.h as u32)];
+    let q8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let q16 = |v: f32| ((v.clamp(0.0, 1.0) * 65535.0).round() as u16).to_le_bytes();
+    match format {
+        FrameFormat::Rgb24 => {
+            for (i, px) in data.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                *px = [q8(r[i]), q8(g[i]), q8(b[i])];
+            }
+        }
+        FrameFormat::Rgb48 => {
+            for (i, px) in data.as_chunks_mut::<6>().0.iter_mut().enumerate() {
+                let (x, y, z) = (q16(r[i]), q16(g[i]), q16(b[i]));
+                *px = [x[0], x[1], y[0], y[1], z[0], z[1]];
+            }
+        }
+    }
+    Frame::new(p.w as u32, p.h as u32, format, data)
+}
+
+/// Run a scale-`s` network over `img` in tiles of `tile` px with `pad` px of
+/// context on each side. Only each tile's interior is kept, so seams vanish
+/// as long as `pad` covers the network's effective receptive field.
+pub fn tiled(
+    img: &Planar,
+    tile: usize,
+    pad: usize,
+    scale: usize,
+    mut run: impl FnMut(&Planar) -> Result<Planar, EngineError>,
+) -> Result<Planar, EngineError> {
+    let tile = tile.max(16);
+    let mut out = Planar::zeros(img.w * scale, img.h * scale);
+    for ty in (0..img.h).step_by(tile) {
+        for tx in (0..img.w).step_by(tile) {
+            let tw = tile.min(img.w - tx);
+            let th = tile.min(img.h - ty);
+            let input = img.region(
+                tx as isize - pad as isize,
+                ty as isize - pad as isize,
+                tw + 2 * pad,
+                th + 2 * pad,
+            );
+            let res = run(&input)?;
+            if res.w != input.w * scale || res.h != input.h * scale {
+                return Err(EngineError::Internal(format!(
+                    "model returned {}×{} for a {}×{} tile at ×{scale}",
+                    res.w, res.h, input.w, input.h
+                )));
+            }
+            let interior = Rect {
+                x: pad * scale,
+                y: pad * scale,
+                w: tw * scale,
+                h: th * scale,
+            };
+            out.blit(&res, interior, tx * scale, ty * scale);
+        }
+    }
+    Ok(out)
+}
+
+/// Exact area-average resample for downscaling by any ratio ≥ 1, e.g. a
+/// native ×4 model reduced to the requested ×2 or ×3. Each output pixel is the
+/// coverage-weighted mean of the source pixels under it, so there's no aliasing.
+pub fn area_resample(src: &Planar, w: usize, h: usize) -> Planar {
+    if (w, h) == (src.w, src.h) {
+        return src.clone();
+    }
+    // Separable: first X, then Y. Weights are computed once per axis.
+    let weights = |n_src: usize, n_dst: usize| -> Vec<Vec<(usize, f32)>> {
+        let r = n_src as f64 / n_dst as f64;
+        (0..n_dst)
+            .map(|o| {
+                let (a, b) = (o as f64 * r, (o + 1) as f64 * r);
+                let mut v = Vec::new();
+                let mut i = a.floor() as usize;
+                while (i as f64) < b && i < n_src {
+                    let cover = (b.min(i as f64 + 1.0) - a.max(i as f64)) / r;
+                    if cover > 0.0 {
+                        v.push((i, cover as f32));
+                    }
+                    i += 1;
+                }
+                v
+            })
+            .collect()
+    };
+    let wx = weights(src.w, w);
+    let wy = weights(src.h, h);
+    let mut tmp = vec![0f32; 3 * src.h * w];
+    for c in 0..3 {
+        for y in 0..src.h {
+            for (x, ws) in wx.iter().enumerate() {
+                tmp[(c * src.h + y) * w + x] = ws.iter().map(|&(i, k)| src.at(c, i, y) * k).sum();
+            }
+        }
+    }
+    let mut out = Planar::zeros(w, h);
+    for c in 0..3 {
+        for (y, ws) in wy.iter().enumerate() {
+            for x in 0..w {
+                let v: f32 = ws
+                    .iter()
+                    .map(|&(i, k)| tmp[(c * src.h + i) * w + x] * k)
+                    .sum();
+                out.set(c, x, y, v);
+            }
+        }
+    }
+    out
+}
+
+/// Pad to the next multiple of `m` (edge replicate). Returns the padded image.
+pub fn pad_to_multiple(img: &Planar, m: usize) -> Planar {
+    let w = img.w.div_ceil(m) * m;
+    let h = img.h.div_ceil(m) * m;
+    if (w, h) == (img.w, img.h) {
+        img.clone()
+    } else {
+        img.region(0, 0, w, h)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ramp(w: usize, h: usize) -> Planar {
+        let mut p = Planar::zeros(w, h);
+        for c in 0..3 {
+            for y in 0..h {
+                for x in 0..w {
+                    p.set(c, x, y, ((x * 7 + y * 13 + c * 29) % 97) as f32 / 97.0);
+                }
+            }
+        }
+        p
+    }
+
+    /// Nearest-neighbour ×s "network": its receptive field is one pixel, so
+    /// tiled output must be *identical* to untiled output.
+    fn nn(s: usize) -> impl FnMut(&Planar) -> Result<Planar, EngineError> {
+        move |p| {
+            let mut o = Planar::zeros(p.w * s, p.h * s);
+            for c in 0..3 {
+                for y in 0..o.h {
+                    for x in 0..o.w {
+                        o.set(c, x, y, p.at(c, x / s, y / s));
+                    }
+                }
+            }
+            Ok(o)
+        }
+    }
+
+    #[test]
+    fn tiling_is_seamless_for_any_tile_size() {
+        let img = ramp(53, 37); // deliberately not multiples of the tile
+        let whole = tiled(&img, 1024, 0, 2, nn(2)).expect("whole");
+        for (tile, pad) in [(16, 0), (17, 3), (32, 10), (40, 1)] {
+            assert_eq!(
+                tiled(&img, tile, pad, 2, nn(2)).expect("tiled"),
+                whole,
+                "tile {tile} pad {pad}"
+            );
+        }
+    }
+
+    #[test]
+    fn frame_roundtrip_8_and_16_bit() {
+        for fmt in [FrameFormat::Rgb24, FrameFormat::Rgb48] {
+            let bytes = fmt.frame_bytes(5, 3);
+            let data: Vec<u8> = (0..bytes).map(|i| (i * 37 % 251) as u8).collect();
+            let f = Frame::new(5, 3, fmt, data);
+            assert_eq!(to_frame(&from_frame(&f), fmt), f, "{fmt:?}");
+        }
+    }
+
+    #[test]
+    fn area_resample_preserves_mean_and_handles_thirds() {
+        let img = ramp(12, 12);
+        let half = area_resample(&img, 6, 6);
+        let mean = |p: &Planar| p.data.iter().sum::<f32>() / p.data.len() as f32;
+        assert!((mean(&half) - mean(&img)).abs() < 1e-4);
+        // 2×2 box average exactly.
+        let expect = (img.at(0, 0, 0) + img.at(0, 1, 0) + img.at(0, 0, 1) + img.at(0, 1, 1)) / 4.0;
+        assert!((half.at(0, 0, 0) - expect).abs() < 1e-6);
+        // ×4 → ×3 (ratio 4/3) keeps the mean too.
+        let third = area_resample(&img, 9, 9);
+        assert!((mean(&third) - mean(&img)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn padding_replicates_edges() {
+        let img = ramp(33, 17);
+        let p = pad_to_multiple(&img, 32);
+        assert_eq!((p.w, p.h), (64, 32));
+        assert_eq!(p.at(1, 63, 31), img.at(1, 32, 16));
+    }
+}

@@ -94,6 +94,9 @@ pub struct GpuDevice {
     pub uuid: DeviceUuid,
     pub name: String,
     pub vendor: Vendor,
+    /// Raw PCI ids; used to cross-check the inference runtime's device list.
+    pub pci_vendor_id: u32,
+    pub pci_device_id: u32,
     pub kind: DeviceKind,
     pub driver_name: String,
     pub driver_info: String,

@@ -37,6 +37,8 @@ enum Cmd {
     },
     /// Download and extract the bundled, freely-licensed models.
     Models,
+    /// Fetch + verify the pinned ncnn source into `.cache/ncnn/src` (used by fs-engine's build.rs).
+    Ncnn,
     /// Fill in empty `sha256 = ""` entries in the manifest (trust-on-first-pin).
     Pin,
     /// Run the FFmpeg license/capability gate against an arbitrary ffmpeg binary.
@@ -73,11 +75,15 @@ fn main() -> Result<()> {
     let m = manifest::Manifest::load()?;
     match cli.cmd {
         Cmd::Setup(t) => {
+            sidecars::fetch_ncnn(&m)?;
             sidecars::run(&m, &t.resolve()?, false)?;
             models::run(&m)
         }
         Cmd::Sidecars { target, stub } => sidecars::run(&m, &target.resolve()?, stub),
         Cmd::Models => models::run(&m),
+        Cmd::Ncnn => {
+            sidecars::fetch_ncnn(&m).map(|p| eprintln!("  ✓ ncnn source → {}", p.display()))
+        }
         Cmd::Pin => pin::run(),
         Cmd::Gate { ffmpeg, target } => gate::check(&m.ffmpeg.gate, &ffmpeg, &target.resolve()?),
         Cmd::GenTypes => {

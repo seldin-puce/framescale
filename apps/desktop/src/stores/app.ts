@@ -34,6 +34,9 @@ export interface StageState {
   sendField: boolean;
 }
 
+/** Stages the inference engine doesn't run yet: shown, but not selectable. */
+export const COMING_SOON: ReadonlySet<StageKind> = new Set<StageKind>(["denoise", "faceFix"]);
+
 export const STAGE_ORDER: StageKind[] = ["deinterlace", "denoise", "upscale", "faceFix", "interpolate"];
 
 export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
@@ -45,8 +48,7 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
   upscale: [
     { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+ (live action)" },
     { id: "realesrgan-x4plus-anime", label: "Real-ESRGAN x4+ Anime" },
-    { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3" },
-    { id: "realcugan-se", label: "Real-CUGAN SE (anime)" },
+    { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
   faceFix: [{ id: "byom", label: "Your model (CodeFormer / GFPGAN)" }],
   interpolate: [{ id: "rife-v4.6", label: "RIFE v4.6" }],

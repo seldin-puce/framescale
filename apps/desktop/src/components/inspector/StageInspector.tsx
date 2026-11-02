@@ -1,5 +1,5 @@
 import type { StageKind } from "@framescale/ipc-types";
-import { MODELS, useApp, type StageState } from "@/stores/app";
+import { COMING_SOON, MODELS, useApp, type StageState } from "@/stores/app";
 import { ProGate } from "../pro/ProGate";
 import { Segmented } from "../ui/Segmented";
 import { STAGE_META } from "./PipelineChain";
@@ -25,7 +25,12 @@ export function StageInspector() {
   return (
     <div className="flex flex-col gap-2.5">
       <div className="text-[13px] font-medium">{STAGE_META[kind].label}</div>
-      {kind !== "deinterlace" && kind !== "faceFix" && (
+      {COMING_SOON.has(kind) && (
+        <p className="rounded-sm bg-white/4 px-2 py-1.5 text-[11px] leading-relaxed text-fg-muted ring-1 ring-border">
+          Coming soon: the engine currently runs Real-ESRGAN upscaling and RIFE interpolation.
+        </p>
+      )}
+      {kind !== "deinterlace" && kind !== "faceFix" && !COMING_SOON.has(kind) && (
         <Field label="Model">
           <select className={selectCls} value={s.model} onChange={(e) => set({ model: e.target.value })}>
             {MODELS[kind as StageKind].map((m) => (

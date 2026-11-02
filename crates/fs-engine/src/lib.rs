@@ -12,13 +12,17 @@
 //! - [`cpu::ReferenceBackend`]: nearest-neighbour scale + linear blend. **Not
 //!   AI**: a deterministic reference that exercises the whole pipeline in tests
 //!   and CI on machines without a GPU.
-//! - `ncnn` (next step, `cpp/`): Vulkan inference everywhere (MoltenVK on macOS).
+//! - [`ncnn`] (feature `ncnn`): Vulkan inference everywhere (MoltenVK on
+//!   macOS), with ncnn's CPU path as a fallback. Real-ESRGAN + RIFE v4.6.
 //! - `coreml`, `tensorrt`: later, behind the same trait.
 #![deny(unsafe_code)]
 
 pub mod cpu;
 pub mod frame;
 pub mod interp;
+#[cfg(feature = "ncnn")]
+pub mod ncnn;
+pub mod planar;
 pub mod tiling;
 
 pub use frame::Frame;

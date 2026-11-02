@@ -46,6 +46,8 @@ pub(crate) mod tests {
             uuid: DeviceUuid([name.len() as u8; 16]),
             name: name.into(),
             vendor,
+            pci_vendor_id: 0,
+            pci_device_id: 0,
             kind,
             driver_name: String::new(),
             driver_info: String::new(),

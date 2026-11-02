@@ -173,6 +173,8 @@ struct RunLog {
 
 fn run_worker(plan: &RenderPlan, start: StartPoint, stop_after_ready: bool) -> RunLog {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fs-worker"))
+        // Deterministic non-AI backend: these tests check pixels bit-exactly.
+        .env("FS_ENGINE", "reference")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

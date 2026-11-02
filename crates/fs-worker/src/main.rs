@@ -6,6 +6,8 @@
 #![deny(unsafe_code)]
 
 mod control;
+#[cfg(feature = "ncnn")]
+mod device;
 mod emit;
 mod ffmpeg;
 mod pipeline;
@@ -114,7 +116,11 @@ fn run() -> i32 {
     let ctrl = control::Control::new(job.duty);
     control::spawn_reader(ctrl.clone(), stdin);
 
-    match pipeline::run(job, ctrl, &emit) {
+    let outcome = pipeline::run(job, ctrl, &emit);
+    // Every ncnn model is dropped by now; tear down Vulkan before exiting.
+    #[cfg(feature = "ncnn")]
+    fs_engine::ncnn::shutdown();
+    match outcome {
         Ok(Outcome::Finished) => exit::OK,
         Ok(Outcome::Stopped { next_segment }) => {
             emit.send(&WorkerEvent::Stopped { next_segment });

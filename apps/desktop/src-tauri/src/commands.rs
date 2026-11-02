@@ -149,6 +149,17 @@ pub fn enqueue_jobs(state: S<'_>, specs: Vec<JobSpec>) -> R<Vec<JobId>> {
         ));
     }
     for spec in &specs {
+        if let Some(s) = spec.pipeline.stages.iter().find(|s| {
+            matches!(
+                s,
+                fs_types::StageConfig::Denoise { .. } | fs_types::StageConfig::FaceFix { .. }
+            )
+        }) {
+            return Err(err(
+                "unsupported",
+                format!("{:?} isn't available in this build yet", s.kind()),
+            ));
+        }
         if let Err(errors) = spec.pipeline.validate() {
             return Err(err("invalidPipeline", format!("{errors:?}")));
         }

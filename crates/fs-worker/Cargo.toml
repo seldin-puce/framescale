@@ -11,6 +11,11 @@ publish.workspace = true
 name = "fs-worker"
 path = "src/main.rs"
 
+[features]
+default = ["ncnn"]
+# Real inference. Without it the worker falls back to the CPU reference backend.
+ncnn = ["fs-engine/ncnn"]
+
 [dependencies]
 fs-types          = { workspace = true }
 fs-engine         = { workspace = true }

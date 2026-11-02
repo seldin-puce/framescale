@@ -15,7 +15,8 @@ Run `cargo xtask doctor` to check.
 
 ```sh
 pnpm install
-cargo xtask setup          # verified FFmpeg/ffprobe + fs-worker sidecars, MoltenVK (macOS), bundled models
+cargo xtask setup          # ncnn source, verified FFmpeg/ffprobe + fs-worker sidecars, MoltenVK (macOS), bundled models
+                           # (the first build compiles ncnn + glslang, ≈1 min on 12 threads)
 pnpm dev                   # tauri dev (Vite on :1420 + Rust host)
 ```
 

@@ -216,15 +216,39 @@ impl Run<'_> {
     }
 }
 
-/// Pick a backend. Only the CPU reference backend is built right now. The ncnn
-/// backend plugs in here behind the same trait.
-fn select_backend(plan: &RenderPlan) -> Box<dyn InferenceBackend> {
-    Box::new(fs_engine::cpu::ReferenceBackend::new(&plan.engine.stages))
+/// Pick the inference backend.
+///
+/// `FS_ENGINE=reference` forces the deterministic CPU reference backend (tests).
+/// Otherwise ncnn is used: Vulkan on the planned GPU, or ncnn's CPU path when
+/// no real GPU exists. A failure to load models is fatal, never a silent
+/// downgrade to the non-AI reference.
+fn select_backend(plan: &RenderPlan, emit: &Emitter) -> Result<Box<dyn InferenceBackend>, Fatal> {
+    if std::env::var("FS_ENGINE").as_deref() == Ok("reference") {
+        return Ok(Box::new(fs_engine::cpu::ReferenceBackend::new(
+            &plan.engine.stages,
+        )));
+    }
+    #[cfg(feature = "ncnn")]
+    {
+        let _ = emit;
+        crate::device::ncnn_backend(&plan.engine).map_err(Fatal::from)
+    }
+    #[cfg(not(feature = "ncnn"))]
+    {
+        emit.send(&WorkerEvent::Warning {
+            code: WarningCode::EncoderFallback,
+            message: "this build has no inference runtime; using the non-AI reference backend"
+                .into(),
+        });
+        Ok(Box::new(fs_engine::cpu::ReferenceBackend::new(
+            &plan.engine.stages,
+        )))
+    }
 }
 
 pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome, Fatal> {
     let plan = Arc::new(job.plan);
-    let backend = select_backend(&plan);
+    let backend = select_backend(&plan, emit)?;
     let max_tile = backend.max_tile();
     emit.send(&WorkerEvent::Ready {
         backend: backend.name().into(),

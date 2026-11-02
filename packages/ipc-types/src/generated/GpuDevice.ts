@@ -3,7 +3,11 @@ import type { DeviceKind } from "./DeviceKind";
 import type { DeviceUuid } from "./DeviceUuid";
 import type { Vendor } from "./Vendor";
 
-export type GpuDevice = { uuid: DeviceUuid, name: string, vendor: Vendor, kind: DeviceKind, driverName: string, driverInfo: string, apiVersion: string, 
+export type GpuDevice = { uuid: DeviceUuid, name: string, vendor: Vendor, 
+/**
+ * Raw PCI ids; used to cross-check the inference runtime's device list.
+ */
+pciVendorId: number, pciDeviceId: number, kind: DeviceKind, driverName: string, driverInfo: string, apiVersion: string, 
 /**
  * Total DEVICE_LOCAL heap size. On UMA devices this is shared system memory.
  */
