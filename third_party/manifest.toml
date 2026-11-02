@@ -1,0 +1,98 @@
+# Pinned third-party artifacts. `cargo xtask` downloads ONLY what is listed
+# here, and it refuses any download whose SHA-256 differs.
+#
+# Entries with sha256 = "" are unpinned. `cargo xtask pin` downloads them
+# once, prints the digest, and writes it here (trust-on-first-pin; review the
+# diff). Before the first release, mirror every artifact into our own
+# release bucket and set `mirror`: upstream autobuilds (BtbN) are pruned
+# after some weeks.
+
+# ------------------------------------------------------------------------------
+# FFmpeg 8.1.3 — LGPL builds (decision: LGPL + HW encoders + SVT-AV1).
+# Runs as a sidecar process only; never linked.
+# ------------------------------------------------------------------------------
+[ffmpeg]
+version = "8.1.3"
+license = "LGPL-2.1-or-later"
+
+# Run against every bundled build by `cargo xtask sidecars`; bundling fails if any check fails.
+[ffmpeg.gate]
+# --enable-version3 (LGPLv3) is acceptable for a separate desktop binary.
+forbidden_configure_flags = ["--enable-gpl", "--enable-nonfree"]
+required_filters = ["zscale", "scdet", "vfrdet", "idet", "bwdif", "fps", "format"]
+required_encoders_common = ["libsvtav1", "ffv1"]
+required_decoders_common = ["libdav1d", "hevc", "h264", "prores", "vp9"]
+
+[ffmpeg.gate.encoders]
+"x86_64-unknown-linux-gnu" = ["hevc_nvenc", "av1_nvenc", "hevc_vaapi", "av1_vaapi", "hevc_qsv", "av1_qsv"]
+"x86_64-pc-windows-msvc"   = ["hevc_nvenc", "av1_nvenc", "hevc_amf", "av1_amf", "hevc_qsv", "av1_qsv"]
+"aarch64-apple-darwin"     = ["hevc_videotoolbox", "prores_videotoolbox"]
+"x86_64-apple-darwin"      = ["hevc_videotoolbox", "prores_videotoolbox"]
+
+[ffmpeg.targets."x86_64-unknown-linux-gnu"]
+url    = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-02-12-51/ffmpeg-n8.1.3-32-g760d10603e-linux64-lgpl-8.1.tar.xz"
+sha256 = "be5123da8ba6a1745814151ccdaaee5151212b65dde44cbe914e5b2cf10661a1"
+mirror = ""
+
+[ffmpeg.targets."x86_64-pc-windows-msvc"]
+url    = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-02-12-51/ffmpeg-n8.1.3-32-g760d10603e-win64-lgpl-8.1.zip"
+sha256 = "d84ba8f0636333a242728908d8cdefa1496893cbc616c706a8379aa4570ced04"
+mirror = ""
+
+# macOS: no trustworthy LGPL prebuilt exists, so we build from source with
+# third_party/ffmpeg/build-macos.sh (pinned versions below). xtask picks up
+# third_party/ffmpeg/out/<target>/bin/{ffmpeg,ffprobe}.
+[ffmpeg.source]
+url    = "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz"
+sha256 = "7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3"
+
+[ffmpeg.source.deps]
+# Only BSD/ISC/WTFPL-licensed libraries, so the build stays LGPL.
+svt_av1 = { url = "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v4.3.0/SVT-AV1-v4.3.0.tar.gz", sha256 = "95ce8fc2381ba707e65ac8b9b2e165915bfbe9cd4d2f7b0f58d64ce31bd98f6d" }
+dav1d   = { url = "https://code.videolan.org/videolan/dav1d/-/archive/1.5.4/dav1d-1.5.4.tar.gz",       sha256 = "a1d5b63d2d38ec9bd03acf643caa51fa22edd1e89c5a109c4807717216bbec07" }
+zimg    = { url = "https://github.com/sekrit-twc/zimg/archive/refs/tags/release-3.0.6.tar.gz",         sha256 = "be89390f13a5c9b2388ce0f44a5e89364a20c1c57ce46d382b1fcc3967057577" }
+
+# ------------------------------------------------------------------------------
+# Inference runtime
+# ------------------------------------------------------------------------------
+[ncnn]
+version = "20261020"
+license = "BSD-3-Clause"
+url     = "https://github.com/Tencent/ncnn/releases/download/20261020/ncnn-20261020-full-source.zip"
+sha256  = "699d9acc67489eee0993a551ca1ebc247bbf0f4e33babe1dec810e6a9a52b988"
+
+[moltenvk]
+version = "1.4.2"
+license = "Apache-2.0"
+url     = "https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar"
+sha256  = "f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
+
+# ------------------------------------------------------------------------------
+# Bundled (freely licensed) models. Encumbered weights such as CodeFormer are
+# NEVER listed here: they are BYOM only, loaded from a user-chosen path.
+# `select` keeps archive entries whose path contains the marker; the output
+# path starts at the marker.
+# ------------------------------------------------------------------------------
+[[models]]
+id      = "realesrgan"
+license = "BSD-3-Clause"
+url     = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip"
+sha256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96"
+select  = ["models/realesrgan-x4plus.", "models/realesrgan-x4plus-anime.", "models/realesr-animevideov3-"]
+dest    = "realesrgan"
+
+[[models]]
+id      = "realcugan"
+license = "MIT"
+url     = "https://github.com/nihui/realcugan-ncnn-vulkan/releases/download/20220728/realcugan-ncnn-vulkan-20220728-ubuntu.zip"
+sha256 = "d745174bd04c0232c89d935b74799311008fda06bea4195f61be5f0f3cc087cb"
+select  = ["models-se/", "models-pro/"]
+dest    = "realcugan"
+
+[[models]]
+id      = "rife"
+license = "MIT"
+url     = "https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip"
+sha256 = "1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68"
+select  = ["rife-v4.6/"]
+dest    = "rife"

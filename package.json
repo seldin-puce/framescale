@@ -1,0 +1,16 @@
+{
+  "name": "framescale",
+  "private": true,
+  "packageManager": "pnpm@12.16.1",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "dev": "pnpm --filter @framescale/desktop tauri dev",
+    "build": "pnpm --filter @framescale/desktop tauri build",
+    "ui:dev": "pnpm --filter @framescale/desktop dev",
+    "ui:build": "pnpm --filter @framescale/desktop build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "gen:types": "cargo xtask gen-types",
+    "setup": "cargo xtask setup"
+  }
+}

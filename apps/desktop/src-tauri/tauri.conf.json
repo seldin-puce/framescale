@@ -1,0 +1,87 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FrameScale AI",
+  "identifier": "ai.framescale.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "FrameScale AI",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1280,
+        "minHeight": 760,
+        "center": true,
+        "visible": false,
+        "resizable": true,
+        "dragDropEnabled": true,
+        "backgroundColor": "#0B0F19"
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: asset: http://asset.localhost fs: http://fs.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost fs: http://fs.localhost",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "media-src": "'self' blob: fs: http://fs.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "frame-ancestors": "'none'"
+      },
+      "freezePrototype": true,
+      "assetProtocol": {
+        "enable": false
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "FrameScale AI",
+    "copyright": "© 2026 FrameScale AI",
+    "category": "Video",
+    "shortDescription": "Local AI video upscaling, restoration and frame interpolation.",
+    "longDescription": "FrameScale AI upscales, de-blurs, restores and interpolates video entirely on your own GPU — NVIDIA, AMD, Intel and Apple Silicon.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe",
+      "binaries/fs-worker"
+    ],
+    "resources": {
+      "resources/models/": "models/",
+      "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY (cargo tauri signer generate)",
+      "endpoints": [
+        "https://updates.framescale.ai/v1/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

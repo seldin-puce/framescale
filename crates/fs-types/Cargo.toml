@@ -1,0 +1,13 @@
+[package]
+name = "fs-types"
+description = "Shared domain model and IPC contract types."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

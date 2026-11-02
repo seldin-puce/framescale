@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # create the draft GitHub release + upload artifacts
+
+env:
+  CARGO_TERM_COLOR: always
+  PNPM_VERSION: 12.16.1
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: build on the OLDEST supported distro so the glibc baseline stays low.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc }
+          # macOS: per-arch bundles (smaller downloads; the updater picks the right one).
+          # For a single universal DMG, use target universal-apple-darwin instead.
+          - { os: macos-15, target: aarch64-apple-darwin }
+          - { os: macos-15, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: "${{ env.PNPM_VERSION }}" }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      - name: Rust toolchain + target
+        shell: bash
+        run: |
+          rustup toolchain install
+          if [ "${{ matrix.target }}" = "universal-apple-darwin" ]; then
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          else
+            rustup target add ${{ matrix.target }}
+          fi
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "${{ matrix.target }}" }
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: macOS FFmpeg build deps
+        if: runner.os == 'macOS'
+        run: brew install meson ninja nasm autoconf automake libtool pkg-config
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .cache/downloads
+            third_party/ffmpeg/out
+          key: thirdparty-${{ matrix.target }}-${{ hashFiles('third_party/manifest.toml', 'third_party/ffmpeg/build-macos.sh') }}
+
+      - name: Sidecars + models (verified, gated)
+        run: cargo xtask setup --target ${{ matrix.target }}
+
+      # Azure Artifact Signing (HSM-backed Authenticode). The hook script reads these.
+      - name: Windows signing client
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          nuget install Microsoft.ArtifactSigning.Client -Version 1.0.146 -OutputDirectory $env:RUNNER_TEMP\tsc
+          $dlib = Get-ChildItem "$env:RUNNER_TEMP\tsc" -Recurse -Filter *.Dlib.dll | Where-Object FullName -like '*x64*' | Select-Object -First 1
+          "FS_SIGN_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          '${{ secrets.AZURE_SIGNING_METADATA_JSON }}' | Out-File -Encoding utf8 "$env:RUNNER_TEMP\metadata.json"
+          "FS_SIGN_METADATA=$env:RUNNER_TEMP\metadata.json" >> $env:GITHUB_ENV
+
+      - name: macOS notarization key
+        if: runner.os == 'macOS'
+        run: |
+          echo "${{ secrets.APPLE_API_KEY_P8 }}" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater artifact signatures (minisign)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS: Developer ID signing + notarization via App Store Connect API key
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          # Windows: Azure Artifact Signing service principal
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: FrameScale AI ${{ github.ref_name }}
+          releaseDraft: true
+          includeUpdaterJson: true

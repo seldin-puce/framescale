@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Supply-chain hardening
+# - Only run install scripts for packages we've reviewed.
+# - Refuse versions published less than 24 h ago: a compromised release is
+#   usually yanked within hours. Bump pins deliberately; don't add exclusions.
+onlyBuiltDependencies:
+  - esbuild
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true

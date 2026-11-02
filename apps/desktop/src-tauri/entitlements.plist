@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened Runtime entitlements for FrameScale AI (Developer ID, not App Store).
+
+  Kept deliberately EMPTY:
+  - No JIT: WKWebView's JIT runs in Apple's WebContent process, not ours.
+  - No disable-library-validation: libMoltenVK.dylib and every sidecar are
+    signed with our own Team ID, so library validation passes.
+  - BYOM model files are data (ncnn .param/.bin, ONNX). We never load code
+    from them, and we never accept PyTorch pickles.
+  Add an entitlement here only with a written justification.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

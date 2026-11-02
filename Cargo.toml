@@ -1,0 +1,125 @@
+# FrameScale AI — Cargo workspace
+#
+# Layout:
+#   apps/desktop/src-tauri  Tauri v2 host (UI bridge, orchestrator, supervisor)
+#   crates/*                Domain crates, shared by the host and fs-worker
+#   xtask                   Build tooling: sidecars, models, pinning, CI gates
+#
+# All third-party versions are pinned once in [workspace.dependencies]
+# (the bill of materials). Member crates opt in with `{ workspace = true }`.
+
+[workspace]
+resolver = "3"
+members = ["apps/desktop/src-tauri", "crates/*", "xtask"]
+# `cargo build` at the root skips xtask; run it via `cargo xtask`.
+default-members = ["apps/desktop/src-tauri", "crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "LicenseRef-FrameScale-Proprietary"
+publish = false
+authors = ["FrameScale AI"]
+
+[workspace.dependencies]
+# --- internal -----------------------------------------------------------------
+fs-types   = { path = "crates/fs-types" }
+fs-hw      = { path = "crates/fs-hw" }
+fs-media   = { path = "crates/fs-media" }
+fs-proc    = { path = "crates/fs-proc" }
+fs-license = { path = "crates/fs-license" }
+fs-journal = { path = "crates/fs-journal" }
+fs-engine  = { path = "crates/fs-engine" }
+
+# --- tauri --------------------------------------------------------------------
+tauri                        = { version = "2.12.5", features = ["macos-private-api"] }
+tauri-build                  = { version = "2.7.4", features = [] }
+tauri-plugin-dialog          = "2.8.4"
+tauri-plugin-updater         = "2.14.1"
+tauri-plugin-process         = "2.4.0"
+tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-window-state    = "2.5.0"
+
+# --- core ---------------------------------------------------------------------
+serde              = { version = "1.0.229", features = ["derive"] }
+serde_json         = "1.0.154"
+thiserror          = "2.0.21"
+anyhow             = "1.0.104"
+tokio              = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs"] }
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+parking_lot        = "0.13.0"
+crossbeam-channel  = "0.5.17"
+uuid               = { version = "1.29.0", features = ["v7", "serde"] }
+ts-rs              = { version = "12.0.1", features = ["uuid-impl", "serde-json-impl"] }
+directories        = "6.0.0"
+
+# --- hardware -----------------------------------------------------------------
+ash          = { version = "0.38.0", default-features = false, features = ["std", "loaded", "debug"] }
+nvml-wrapper = "0.13.0"   # dlopen()s libnvidia-ml at runtime: no link-time NVIDIA dependency
+sysinfo      = "0.40.1"
+
+# --- media / engine -----------------------------------------------------------
+xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+cxx         = "1.0.205"
+cxx-build   = "1.0.205"
+cmake       = "0.1.58"
+
+# --- storage / journal --------------------------------------------------------
+rusqlite = { version = "0.41.1", features = ["bundled"] }  # static SQLite: no system lib differences
+fs4      = "1.1.0"
+
+# --- security -----------------------------------------------------------------
+ed25519-dalek = "3.0.0"
+base64        = "0.23.1"
+sha2          = "0.11.1"
+
+# --- process / OS -------------------------------------------------------------
+nix         = { version = "0.31.3", features = ["signal", "process", "fs"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
+# --- xtask only ---------------------------------------------------------------
+clap    = { version = "4.6.7", features = ["derive"] }
+toml    = "1.1.8"
+zip     = { version = "9.2.2", default-features = false, features = ["deflate"] }
+tar     = "0.4.46"
+lzma-rs = "0.3.0"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+
+# ------------------------------------------------------------------------------
+# Profiles
+# ------------------------------------------------------------------------------
+
+# Keep dev builds usable for pixel work: optimise dependencies, not our crates.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# Unwind (not abort): fs-worker converts panics at the FFI boundary into
+# structured errors so the supervisor can log a reason before restarting it.
+panic = "unwind"
+# Ship stripped binaries but keep line tables in split debug files
+# (.dSYM / .pdb / .dwp) for symbolicating crash reports.
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "none"
+
+# Fast local release-like builds without LTO.
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16

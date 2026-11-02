@@ -1,0 +1,73 @@
+/*
+ * FrameScale design tokens — Pro Dark (Fluent 2 / Apple HIG hybrid).
+ * Tailwind v4: tokens declared in @theme become utilities (bg-surface, text-fg-muted, …).
+ * Phase 3 builds the component layer on top of these.
+ */
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Surfaces */
+  --color-bg: #0b0f19;
+  --color-surface: #111827;
+  --color-surface-raised: #172033;
+  --color-surface-glass: rgb(17 24 39 / 0.72);
+  --color-border: rgb(255 255 255 / 0.08);
+  --color-border-strong: rgb(255 255 255 / 0.14);
+
+  /* Text */
+  --color-fg: #e6e9f0;
+  --color-fg-muted: #9aa3b5;
+  --color-fg-subtle: #6b7489;
+
+  /* Semantic */
+  --color-accent: #4c8dff;
+  --color-accent-hover: #6aa1ff;
+  --color-pro: #f2b544;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-err: #f87171;
+
+  /* Type */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  /* Shape & motion */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --ease-out-fluent: cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-fg antialiased;
+    font-feature-settings: "cv11", "ss01";
+    overflow: hidden;
+    user-select: none; /* desktop app: opt in to selection per element */
+  }
+  /* Telemetry numbers must not jitter as digits change. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* With native window materials (Mica / vibrancy) the window is transparent;
+   the shell paints translucent surfaces instead of the solid page background. */
+:root[data-native-material="true"] body {
+  background: transparent;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --color-surface-glass: var(--color-surface);
+  }
+}

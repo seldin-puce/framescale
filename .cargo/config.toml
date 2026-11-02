@@ -1,0 +1,13 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
+[env]
+# Oldest macOS we support (VideoToolbox ProRes encode + MoltenVK 1.4 baseline).
+MACOSX_DEPLOYMENT_TARGET = "12.0"
+# ts-rs writes generated IPC bindings straight into the shared TS package.
+TS_RS_EXPORT_DIR = { value = "packages/ipc-types/src/generated", relative = true }
+
+# Statically link the MSVC runtime: no VC++ redistributable required for the
+# app or for the fs-worker sidecar.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

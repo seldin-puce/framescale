@@ -1,0 +1,39 @@
+[package]
+name = "framescale"
+description = "FrameScale AI desktop host: UI bridge, job orchestrator, process supervisor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "framescale"
+
+[lib]
+# `_lib` suffix avoids a Windows name clash between the bin's .pdb and the lib's.
+name = "framescale_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+fs-types   = { workspace = true }
+fs-hw      = { workspace = true }
+fs-media   = { workspace = true }
+fs-proc    = { workspace = true }
+fs-license = { workspace = true }
+fs-journal = { workspace = true }
+
+tauri                     = { workspace = true }
+tauri-plugin-dialog       = { workspace = true }
+tauri-plugin-updater      = { workspace = true }
+tauri-plugin-process      = { workspace = true }
+tauri-plugin-window-state = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
+serde                     = { workspace = true }
+serde_json                = { workspace = true }
+tracing                   = { workspace = true }
+tracing-subscriber        = { workspace = true }
+
+[lints]
+workspace = true

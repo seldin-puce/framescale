@@ -1,0 +1,153 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, Result, bail};
+
+pub fn root() -> PathBuf {
+    // xtask/ lives directly under the workspace root.
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn manifest_path() -> PathBuf {
+    root().join("third_party/manifest.toml")
+}
+
+pub fn cache_dir() -> PathBuf {
+    root().join(".cache")
+}
+
+pub fn tauri_dir() -> PathBuf {
+    root().join("apps/desktop/src-tauri")
+}
+
+pub fn host_triple() -> Result<String> {
+    let out = Command::new(rustc())
+        .arg("-vV")
+        .output()
+        .context("running rustc -vV")?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: ").map(str::to_owned))
+        .context("rustc -vV did not report a host triple")
+}
+
+pub fn exe_suffix(triple: &str) -> &'static str {
+    if triple.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    }
+}
+
+pub fn is_macos(triple: &str) -> bool {
+    triple.ends_with("apple-darwin")
+}
+
+fn rustc() -> String {
+    std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into())
+}
+
+/// Run the same cargo that is running us, from the workspace root.
+pub fn cargo(args: &[&str]) -> Result<()> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    run(Command::new(cargo).args(args).current_dir(root()))
+}
+
+pub fn run(cmd: &mut Command) -> Result<()> {
+    let status = cmd.status().with_context(|| format!("spawning {cmd:?}"))?;
+    if !status.success() {
+        bail!("command failed ({status}): {cmd:?}");
+    }
+    Ok(())
+}
+
+pub fn output(cmd: &mut Command) -> Result<String> {
+    let out = cmd.output().with_context(|| format!("spawning {cmd:?}"))?;
+    if !out.status.success() {
+        bail!(
+            "command failed ({}): {cmd:?}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+pub fn copy_executable(from: &Path, to: &Path) -> Result<()> {
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::copy(from, to)
+        .with_context(|| format!("copy {} → {}", from.display(), to.display()))?;
+    make_executable(to)
+}
+
+pub fn make_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+/// Find the first file under `dir` whose path ends with `suffix` (using `/` separators).
+pub fn find_file(dir: &Path, suffix: &str) -> Option<PathBuf> {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).ok()?.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.to_string_lossy().replace('\\', "/").ends_with(suffix) {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn doctor() -> Result<()> {
+    let check = |name: &str, cmd: &mut Command| {
+        let ok = cmd.output().map(|o| o.status.success()).unwrap_or(false);
+        println!("  [{}] {name}", if ok { "ok" } else { "MISSING" });
+        ok
+    };
+    println!("FrameScale doctor");
+    let mut ok = true;
+    ok &= check("node >= 22", Command::new("node").arg("--version"));
+    ok &= check("pnpm", Command::new("pnpm").arg("--version"));
+    ok &= check("curl", Command::new("curl").arg("--version"));
+    if cfg!(target_os = "linux") {
+        ok &= check("C toolchain (cc)", Command::new("cc").arg("--version"));
+        for lib in ["webkit2gtk-4.1", "libsoup-3.0", "javascriptcoregtk-4.1"] {
+            ok &= check(
+                &format!("pkg-config {lib}"),
+                Command::new("pkg-config").args(["--exists", lib]),
+            );
+        }
+    }
+    if cfg!(target_os = "macos") {
+        ok &= check(
+            "Xcode command line tools",
+            Command::new("xcode-select").arg("-p"),
+        );
+        ok &= check(
+            "meson (FFmpeg deps build)",
+            Command::new("meson").arg("--version"),
+        );
+        ok &= check("nasm (dav1d/SVT-AV1)", Command::new("nasm").arg("-v"));
+        ok &= check("cmake", Command::new("cmake").arg("--version"));
+    }
+    if cfg!(windows) {
+        ok &= check("pwsh (signing hook)", Command::new("pwsh").arg("-v"));
+    }
+    if !ok {
+        bail!("missing prerequisites (see docs/build-and-release.md)");
+    }
+    Ok(())
+}

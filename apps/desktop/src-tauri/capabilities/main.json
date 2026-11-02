@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Least-privilege grants for the main window. The shell plugin is intentionally absent: sidecars are spawned from Rust only.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-focus",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "updater:default",
+    "process:allow-restart",
+    "window-state:default"
+  ]
+}

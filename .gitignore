@@ -1,0 +1,37 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Tauri
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/.gitkeep
+apps/desktop/src-tauri/frameworks/*
+!apps/desktop/src-tauri/frameworks/.gitkeep
+apps/desktop/src-tauri/resources/models/*
+!apps/desktop/src-tauri/resources/models/.gitkeep
+
+# Fetched / built third-party artifacts (pinned in third_party/manifest.toml)
+/.cache/
+third_party/ffmpeg/out/
+
+# Generated IPC types are committed (CI checks for drift); nothing to ignore.
+
+# Secrets — never commit signing material
+*.p12
+*.pfx
+*.key
+.env
+.env.*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

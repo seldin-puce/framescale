@@ -1,0 +1,22 @@
+[package]
+name = "fs-worker"
+description = "FrameScale render worker: decode pipe → GPU stages → segmented encode pipe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fs-worker"
+path = "src/main.rs"
+
+[dependencies]
+fs-types   = { workspace = true }
+fs-engine  = { workspace = true }
+fs-media   = { workspace = true }
+fs-proc    = { workspace = true }
+fs-license = { workspace = true }
+
+[lints]
+workspace = true

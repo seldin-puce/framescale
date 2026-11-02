@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+# Release targets are added per CI job (`rustup target add`), not here,
+# so local dev installs stay lean.
+profile = "minimal"
