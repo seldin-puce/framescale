@@ -21,6 +21,8 @@ pub enum PlanError {
     Encoder(#[from] EncoderError),
     #[error("source has invalid dimensions {0}×{1}")]
     BadDimensions(u32, u32),
+    #[error("{0}")]
+    Output(String),
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +64,9 @@ pub fn hw_decode_for(device: Option<&GpuDevice>, os: Os) -> HwDecode {
 
 pub fn compile(i: &PlanInputs<'_>) -> Result<Planned, PlanError> {
     i.spec.pipeline.validate().map_err(PlanError::Pipeline)?;
+    if let Some(why) = i.spec.output.problem() {
+        return Err(PlanError::Output(why));
+    }
     let v = &i.info.video;
     if v.width == 0 || v.height == 0 {
         return Err(PlanError::BadDimensions(v.width, v.height));

@@ -39,6 +39,13 @@ export interface StageState {
 /** Stages shown but not runnable yet (none right now). */
 export const COMING_SOON: ReadonlySet<StageKind> = new Set<StageKind>();
 
+/** Mirrors `Container::accepts` in fs-types: what FFmpeg can mux. */
+export function containerAccepts(container: Container, codec: VideoCodec): boolean {
+  if (container === "mov") return codec !== "av1";
+  if (container === "mp4") return codec !== "proRes422Hq" && codec !== "proRes4444";
+  return true;
+}
+
 /** Upscale model with a noise-removal blend. */
 export const GENERAL_V3 = "realesr-general-x4v3";
 
@@ -324,7 +331,9 @@ export const useApp = create<AppStore>()((set, get) => ({
       // Mesa ships VAAPI without H.264/HEVC, but AV1 works on RDNA3+).
       const { output, outputTouched } = get();
       if (!outputTouched && output.codec !== preferredCodec(hw.encoders)) {
-        set({ output: { ...output, codec: preferredCodec(hw.encoders) } });
+        const codec = preferredCodec(hw.encoders);
+        const container = containerAccepts(output.container, codec) ? output.container : codec === "av1" ? "mp4" : "mov";
+        set({ output: { ...output, codec, container } });
       }
     };
     void poll();
@@ -382,7 +391,16 @@ export const useApp = create<AppStore>()((set, get) => ({
   select: (id) => set({ selected: id }),
   setStage: (kind, patch) => set((s) => ({ stages: { ...s.stages, [kind]: { ...s.stages[kind], ...patch } } })),
   selectStage: (kind) => set({ selectedStage: kind }),
-  setOutput: (patch) => set((s) => ({ output: { ...s.output, ...patch }, outputTouched: true })),
+  setOutput: (patch) =>
+    set((s) => {
+      const next = { ...s.output, ...patch };
+      // Keep codec and container compatible: a new codec moves the container.
+      if (!containerAccepts(next.container, next.codec)) {
+        next.container = patch.container && !patch.codec ? next.container : next.codec === "av1" ? "mp4" : "mov";
+        if (!containerAccepts(next.container, next.codec)) next.container = "mkv";
+      }
+      return { output: next, outputTouched: true };
+    }),
   async setEco(mode) {
     set({ eco: mode });
     await backend.setEcoMode(mode);

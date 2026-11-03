@@ -2,7 +2,7 @@ import type { Container, VideoCodec } from "@framescale/ipc-types";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { backend } from "@/ipc";
 import { prettyDir } from "@/lib/format";
-import { CODEC_ENCODERS, useApp } from "@/stores/app";
+import { CODEC_ENCODERS, containerAccepts, useApp } from "@/stores/app";
 import { Tooltip } from "../ui/Tooltip";
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
@@ -50,9 +50,11 @@ export function OutputSettings() {
           ))}
         </select>
         <select aria-label="Container" className={selectCls} value={output.container} onChange={(e) => setOutput({ container: e.target.value as Container })}>
-          <option value="mp4">MP4</option>
-          <option value="mkv">MKV</option>
-          <option value="mov">MOV</option>
+          {(["mp4", "mkv", "mov"] as const).map((c) => (
+            <option key={c} value={c} disabled={!containerAccepts(c, output.codec)}>
+              {c.toUpperCase()}
+            </option>
+          ))}
         </select>
       </div>
       <label className="flex flex-col gap-1">

@@ -128,6 +128,9 @@ pub async fn probe_media(state: S<'_>, paths: Vec<String>) -> R<Vec<ProbeResult>
 pub fn enqueue_jobs(state: S<'_>, mut specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     for spec in &specs {
         validate_pipeline(&spec.pipeline)?;
+        if let Some(why) = spec.output.problem() {
+            return Err(err("invalidOutput", why));
+        }
     }
     // Never overwrite: not an existing file, not another job's pending output.
     let mut taken: std::collections::HashSet<String> = journal(&state, |j| j.list_jobs())?

@@ -238,6 +238,16 @@ impl Container {
             Self::Mkv => "matroska",
         }
     }
+
+    /// Whether FFmpeg can store `codec` in this container: AV1 isn't allowed
+    /// in MOV, ProRes isn't allowed in MP4; MKV takes everything.
+    pub fn accepts(self, codec: VideoCodec) -> bool {
+        !matches!(
+            (self, codec),
+            (Self::Mov, VideoCodec::Av1)
+                | (Self::Mp4, VideoCodec::ProRes422Hq | VideoCodec::ProRes4444)
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
@@ -262,6 +272,22 @@ pub struct OutputSpec {
     pub encoder: EncoderPreference,
 }
 
+impl OutputSpec {
+    /// A user-facing reason this output can't be written, if any.
+    pub fn problem(&self) -> Option<String> {
+        (!self.container.accepts(self.codec)).then(|| {
+            let (name, instead) = match self.codec {
+                VideoCodec::Av1 => ("AV1", "MP4"),
+                _ => ("ProRes", "MOV"),
+            };
+            format!(
+                "{name} video can't be stored in {}: choose {instead} or MKV",
+                self.container.extension().to_uppercase()
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -276,6 +302,31 @@ pub struct JobSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn containers_accept_what_ffmpeg_can_mux() {
+        use Container::*;
+        use VideoCodec::*;
+        // Measured with FFmpeg 8.1 (`-c copy -f <muxer>`).
+        assert!(!Mov.accepts(Av1), "mov: av1 only supported in MP4 and AVIF");
+        assert!(!Mp4.accepts(ProRes422Hq) && !Mp4.accepts(ProRes4444));
+        for c in [Hevc10, Av1, H264, ProRes422Hq, ProRes4444] {
+            assert!(Mkv.accepts(c));
+        }
+        assert!(Mp4.accepts(Av1) && Mov.accepts(Hevc10) && Mov.accepts(ProRes4444));
+        let out = |codec, container| OutputSpec {
+            path: "o".into(),
+            codec,
+            container,
+            quality: 20,
+            encoder: EncoderPreference::Auto,
+        };
+        assert_eq!(
+            out(Av1, Mov).problem().as_deref(),
+            Some("AV1 video can't be stored in MOV: choose MP4 or MKV")
+        );
+        assert_eq!(out(Av1, Mp4).problem(), None);
+    }
 
     fn m() -> ModelRef {
         ModelRef {
