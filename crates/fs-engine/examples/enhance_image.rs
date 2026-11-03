@@ -1,5 +1,5 @@
-//! Run the real engine on one image (raw RGB24), e.g. for website before/after
-//! pictures:
+//! Run the real engine on one image or a few raw frames (RGB24, back to back),
+//! e.g. for website before/after pictures and demo videos:
 //!
 //!   enhance_image <in.rgb> <width> <height> <out.rgb> [--denoise ID LEVEL] [--upscale ID SCALE] [--noise 0-1] [--facefix FIDELITY]
 //!
@@ -94,18 +94,25 @@ fn main() {
         tile: None,
         models_dir: models.to_string_lossy().into(),
     };
+    // One frame, or several back to back (raw video): models load once.
     let data = std::fs::read(&a[1]).expect("read input");
-    assert_eq!(
-        data.len(),
-        (w * h * 3) as usize,
-        "input must be {w}×{h} RGB24"
+    let size = (w * h * 3) as usize;
+    assert!(
+        !data.is_empty() && data.len().is_multiple_of(size),
+        "input must be {w}×{h} RGB24 frames"
     );
-    let out = {
-        let mut b = NcnnBackend::new(&plan, device, 8).expect("load models");
-        b.process(&Frame::new(w, h, FrameFormat::Rgb24, data), 256)
-            .expect("process")
-    };
-    std::fs::write(&a[4], &out.data).expect("write output");
-    eprintln!("wrote {}×{}", out.width, out.height);
+    let mut b = NcnnBackend::new(&plan, device, 8).expect("load models");
+    let mut out = Vec::new();
+    let (mut ow, mut oh) = (w, h);
+    for chunk in data.chunks(size) {
+        let f = b
+            .process(&Frame::new(w, h, FrameFormat::Rgb24, chunk.to_vec()), 256)
+            .expect("process");
+        (ow, oh) = (f.width, f.height);
+        out.extend_from_slice(&f.data);
+    }
+    drop(b);
+    std::fs::write(&a[4], &out).expect("write output");
+    eprintln!("wrote {} frame(s) of {ow}×{oh}", data.len() / size);
     ncnn::shutdown();
 }
