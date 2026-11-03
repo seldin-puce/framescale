@@ -25,3 +25,7 @@ cmake     = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "bench"
+required-features = ["ncnn"]

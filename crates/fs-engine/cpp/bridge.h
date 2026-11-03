@@ -26,11 +26,11 @@ public:
 
     // Super-resolution: planar RGB [3][h][w] in 0–1 → planar [3][out_h][out_w].
     void run_sr(rust::Slice<const float> input, int32_t w, int32_t h,
-                rust::Slice<float> output, int32_t out_w, int32_t out_h);
+                rust::Slice<float> output, int32_t out_w, int32_t out_h) const;
 
     // RIFE v4: two planar RGB frames (w, h multiples of 32) + timestep → frame at t.
     void run_rife(rust::Slice<const float> a, rust::Slice<const float> b,
-                  int32_t w, int32_t h, float t, rust::Slice<float> output);
+                  int32_t w, int32_t h, float t, rust::Slice<float> output) const;
 
 private:
     std::unique_ptr<ncnn::Net> net_;

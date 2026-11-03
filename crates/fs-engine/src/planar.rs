@@ -41,16 +41,23 @@ impl Planar {
     }
 
     /// Copy region `[x0, x0+w) × [y0, y0+h)`, replicating edge pixels for
-    /// coordinates outside the image (tile pre-padding at borders).
+    /// coordinates outside the image (tile pre-padding at borders). Rows are
+    /// copied as slices; only the out-of-image margins are filled per pixel.
     pub fn region(&self, x0: isize, y0: isize, w: usize, h: usize) -> Self {
         let mut out = Self::zeros(w, h);
+        let sw = self.w as isize;
+        // Columns [lead, lead + mid) map 1:1 onto source columns [sx0, sx0 + mid).
+        let lead = (-x0).clamp(0, w as isize) as usize;
+        let sx0 = x0.max(0).min(sw) as usize;
+        let mid = ((x0 + w as isize).min(sw) - x0.max(0)).max(0) as usize;
         for c in 0..3 {
             for y in 0..h {
                 let sy = (y0 + y as isize).clamp(0, self.h as isize - 1) as usize;
-                for x in 0..w {
-                    let sx = (x0 + x as isize).clamp(0, self.w as isize - 1) as usize;
-                    out.set(c, x, y, self.at(c, sx, sy));
-                }
+                let src = &self.data[(c * self.h + sy) * self.w..][..self.w];
+                let dst = &mut out.data[(c * h + y) * w..][..w];
+                dst[..lead].fill(src[0]);
+                dst[lead..lead + mid].copy_from_slice(&src[sx0..sx0 + mid]);
+                dst[lead + mid..].fill(src[self.w - 1]);
             }
         }
         out
@@ -68,53 +75,81 @@ impl Planar {
     }
 }
 
+/// Split work over rows across threads (conversion of 4K frames is ~8 MP).
+fn par_rows<T: Send, U: Sync>(
+    rows: usize,
+    out: &mut [T],
+    out_per_row: usize,
+    shared: &U,
+    f: impl Fn(usize, &mut [T], &U) + Sync,
+) {
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(1, 16);
+    let per = rows.div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        for (i, chunk) in out.chunks_mut(per * out_per_row).enumerate() {
+            let f = &f;
+            s.spawn(move || f(i * per, chunk, shared));
+        }
+    });
+}
+
 pub fn from_frame(f: &Frame) -> Planar {
     let (w, h) = (f.width as usize, f.height as usize);
     let mut p = Planar::zeros(w, h);
     let plane = w * h;
     let (r, rest) = p.data.split_at_mut(plane);
     let (g, b) = rest.split_at_mut(plane);
-    match f.format {
-        FrameFormat::Rgb24 => {
-            for (i, px) in f.data.as_chunks::<3>().0.iter().enumerate() {
-                r[i] = f32::from(px[0]) * (1.0 / 255.0);
-                g[i] = f32::from(px[1]) * (1.0 / 255.0);
-                b[i] = f32::from(px[2]) * (1.0 / 255.0);
+    for (c, dst) in [r, g, b].into_iter().enumerate() {
+        par_rows(h, dst, w, &f.data, |row0, chunk, data| match f.format {
+            FrameFormat::Rgb24 => {
+                let src = &data[row0 * w * 3..];
+                for (i, v) in chunk.iter_mut().enumerate() {
+                    *v = f32::from(src[i * 3 + c]) * (1.0 / 255.0);
+                }
             }
-        }
-        FrameFormat::Rgb48 => {
-            let s = |lo: u8, hi: u8| f32::from(u16::from_le_bytes([lo, hi])) * (1.0 / 65535.0);
-            for (i, px) in f.data.as_chunks::<6>().0.iter().enumerate() {
-                r[i] = s(px[0], px[1]);
-                g[i] = s(px[2], px[3]);
-                b[i] = s(px[4], px[5]);
+            FrameFormat::Rgb48 => {
+                let src = &data[row0 * w * 6..];
+                for (i, v) in chunk.iter_mut().enumerate() {
+                    let k = i * 6 + c * 2;
+                    *v = f32::from(u16::from_le_bytes([src[k], src[k + 1]])) * (1.0 / 65535.0);
+                }
             }
-        }
+        });
     }
     p
 }
 
 pub fn to_frame(p: &Planar, format: FrameFormat) -> Frame {
-    let plane = p.w * p.h;
-    let (r, rest) = p.data.split_at(plane);
-    let (g, b) = rest.split_at(plane);
-    let mut data = vec![0u8; format.frame_bytes(p.w as u32, p.h as u32)];
-    let q8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let q16 = |v: f32| ((v.clamp(0.0, 1.0) * 65535.0).round() as u16).to_le_bytes();
-    match format {
-        FrameFormat::Rgb24 => {
-            for (i, px) in data.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-                *px = [q8(r[i]), q8(g[i]), q8(b[i])];
+    let (w, h) = (p.w, p.h);
+    let bpp = format.bytes_per_pixel();
+    let mut data = vec![0u8; format.frame_bytes(w as u32, h as u32)];
+    par_rows(h, &mut data, w * bpp, p, |row0, chunk, p| {
+        let plane = p.w * p.h;
+        let base = row0 * p.w;
+        let (r, g, b) = (
+            &p.data[base..],
+            &p.data[plane + base..],
+            &p.data[2 * plane + base..],
+        );
+        match format {
+            FrameFormat::Rgb24 => {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                for (i, px) in chunk.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                    *px = [q(r[i]), q(g[i]), q(b[i])];
+                }
+            }
+            FrameFormat::Rgb48 => {
+                let q = |v: f32| ((v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16).to_le_bytes();
+                for (i, px) in chunk.as_chunks_mut::<6>().0.iter_mut().enumerate() {
+                    let (x, y, z) = (q(r[i]), q(g[i]), q(b[i]));
+                    *px = [x[0], x[1], y[0], y[1], z[0], z[1]];
+                }
             }
         }
-        FrameFormat::Rgb48 => {
-            for (i, px) in data.as_chunks_mut::<6>().0.iter_mut().enumerate() {
-                let (x, y, z) = (q16(r[i]), q16(g[i]), q16(b[i]));
-                *px = [x[0], x[1], y[0], y[1], z[0], z[1]];
-            }
-        }
-    }
-    Frame::new(p.w as u32, p.h as u32, format, data)
+    });
+    Frame::new(w as u32, h as u32, format, data)
 }
 
 /// Run a scale-`s` network over `img` in tiles of `tile` px with `pad` px of
@@ -125,37 +160,101 @@ pub fn tiled(
     tile: usize,
     pad: usize,
     scale: usize,
-    mut run: impl FnMut(&Planar) -> Result<Planar, EngineError>,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<Planar, EngineError> {
-    let tile = tile.max(16);
     let mut out = Planar::zeros(img.w * scale, img.h * scale);
-    for ty in (0..img.h).step_by(tile) {
-        for tx in (0..img.w).step_by(tile) {
-            let tw = tile.min(img.w - tx);
-            let th = tile.min(img.h - ty);
-            let input = img.region(
-                tx as isize - pad as isize,
-                ty as isize - pad as isize,
-                tw + 2 * pad,
-                th + 2 * pad,
-            );
-            let res = run(&input)?;
-            if res.w != input.w * scale || res.h != input.h * scale {
-                return Err(EngineError::Internal(format!(
-                    "model returned {}×{} for a {}×{} tile at ×{scale}",
-                    res.w, res.h, input.w, input.h
-                )));
-            }
-            let interior = Rect {
-                x: pad * scale,
-                y: pad * scale,
-                w: tw * scale,
-                h: th * scale,
-            };
-            out.blit(&res, interior, tx * scale, ty * scale);
-        }
-    }
+    tiled_into(img, tile, pad, scale, 1, &mut out, run)?;
     Ok(out)
+}
+
+/// [`tiled`] with `workers` concurrent tile runners writing into a reusable
+/// `out` buffer (resized if needed). With two or more workers, one tile's
+/// CPU-side copies overlap another tile's GPU time. The output is identical
+/// regardless of worker count.
+pub fn tiled_into(
+    img: &Planar,
+    tile: usize,
+    pad: usize,
+    scale: usize,
+    workers: usize,
+    out: &mut Planar,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
+) -> Result<(), EngineError> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let tile = tile.max(16);
+    if (out.w, out.h) != (img.w * scale, img.h * scale) {
+        *out = Planar::zeros(img.w * scale, img.h * scale);
+    }
+    let tiles: Vec<(usize, usize, usize, usize)> = (0..img.h)
+        .step_by(tile)
+        .flat_map(|ty| (0..img.w).step_by(tile).map(move |tx| (tx, ty)))
+        .map(|(tx, ty)| (tx, ty, tile.min(img.w - tx), tile.min(img.h - ty)))
+        .collect();
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let (tx_res, rx_res) =
+        std::sync::mpsc::sync_channel::<Result<(usize, Planar), EngineError>>(workers.max(1));
+
+    std::thread::scope(|s| {
+        for _ in 0..workers.max(1) {
+            let (next, stop, tiles, run, tx_res) = (&next, &stop, &tiles, &run, tx_res.clone());
+            s.spawn(move || {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= tiles.len() || stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let (x, y, w, h) = tiles[i];
+                    let input = img.region(
+                        x as isize - pad as isize,
+                        y as isize - pad as isize,
+                        w + 2 * pad,
+                        h + 2 * pad,
+                    );
+                    let r = run(&input).and_then(|res| {
+                        if res.w == input.w * scale && res.h == input.h * scale {
+                            Ok((i, res))
+                        } else {
+                            Err(EngineError::Internal(format!(
+                                "model returned {}×{} for a {}×{} tile at ×{scale}",
+                                res.w, res.h, input.w, input.h
+                            )))
+                        }
+                    });
+                    if r.is_err() {
+                        stop.store(true, Ordering::Relaxed);
+                    }
+                    if tx_res.send(r).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(tx_res);
+        // Stitch on this thread as results arrive (blits are disjoint).
+        let mut first_err = None;
+        for r in rx_res {
+            match r {
+                Ok((i, res)) if first_err.is_none() => {
+                    let (x, y, w, h) = tiles[i];
+                    let interior = Rect {
+                        x: pad * scale,
+                        y: pad * scale,
+                        w: w * scale,
+                        h: h * scale,
+                    };
+                    out.blit(&res, interior, x * scale, y * scale);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    stop.store(true, Ordering::Relaxed);
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        first_err.map_or(Ok(()), Err)
+    })
 }
 
 /// Exact area-average resample for downscaling by any ratio ≥ 1, e.g. a
@@ -238,7 +337,7 @@ mod tests {
 
     /// Nearest-neighbour ×s "network": its receptive field is one pixel, so
     /// tiled output must be *identical* to untiled output.
-    fn nn(s: usize) -> impl FnMut(&Planar) -> Result<Planar, EngineError> {
+    fn nn(s: usize) -> impl Fn(&Planar) -> Result<Planar, EngineError> + Sync {
         move |p| {
             let mut o = Planar::zeros(p.w * s, p.h * s);
             for c in 0..3 {
@@ -263,6 +362,25 @@ mod tests {
                 "tile {tile} pad {pad}"
             );
         }
+    }
+
+    #[test]
+    fn parallel_tiling_matches_sequential_and_reuses_buffer() {
+        let img = ramp(97, 61);
+        let seq = tiled(&img, 20, 4, 2, nn(2)).expect("seq");
+        let mut out = Planar::zeros(1, 1);
+        for workers in [2, 3, 8] {
+            tiled_into(&img, 20, 4, 2, workers, &mut out, nn(2)).expect("par");
+            assert_eq!(out, seq, "{workers} workers");
+        }
+        // Errors propagate and stop the other workers.
+        let failing = |_: &Planar| -> Result<Planar, EngineError> {
+            Err(EngineError::OutOfDeviceMemory { tile: 20 })
+        };
+        assert_eq!(
+            tiled_into(&img, 20, 4, 2, 3, &mut out, failing),
+            Err(EngineError::OutOfDeviceMemory { tile: 20 })
+        );
     }
 
     #[test]

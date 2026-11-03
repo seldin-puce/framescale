@@ -32,6 +32,31 @@
 - Verified: real models on ncnn CPU + Vulkan (lavapipe); full 10 s job with
   real Real-ESRGAN, hard pause and resume: 12 s on 6 CPU cores.
 
+## Measured performance (RX 9070 XT, Fedora 44, Mesa 26.2.5 RADV)
+
+`cargo run --release -p fs-engine --features ncnn --example bench` (inference
+plus CPU-side conversion; excludes decode/encode):
+
+| Workload | fps |
+|---|---|
+| Real-ESR AnimeVideo-v3 ×2, 1920×1080 → 3840×2160 | **10.9** |
+| Real-ESRGAN x4plus ×4, 960×540 → 3840×2160 | **1.31** |
+| Real-ESRGAN x4plus ×2, 1920×1080 → 3840×2160 | 0.31 |
+| RIFE v4.6, 1920×1080 | 4.5 |
+| RIFE v4.6, 3840×2160 | 1.14 |
+
+How we got there (from 2.7 / 0.56 fps):
+- Host Mesa 26.2 vs Debian's 25.0: RDNA4 cooperative matrix exposed; ~1.5×.
+- CPU overhead 95 → ~5 ms/frame: slice-based tile extraction, multi-threaded
+  packing, a reused output buffer.
+- Two concurrent ncnn extractors per GPU: CPU slicing/stitching overlaps GPU work.
+- Tile sweep: small tiles win on RDNA4 (256 px light / 192 px heavy).
+- FP16 *arithmetic* measured and rejected: slower for SR and up to 231/255 error.
+
+The official `realesrgan-ncnn-vulkan` (2022 build) on the same GPU took 8.8 s for
+x4plus 540p→4K (incl. load) vs our 0.76 s/frame. The Arc iGPU is ~60× slower
+than the 9070 XT, which the default ranking correctly avoids.
+
 ## Bugs real binaries caught (and the fixes)
 
 1. zimg only outputs planar formats. Requesting `rgb24` made FFmpeg insert swscale
@@ -50,7 +75,9 @@
 - Windows CPU path is single-threaded (MSVC OpenMP needs vcomp140.dll).
 - SR pre/post-processing runs on the CPU (u8/u16 ⇄ f32); GPU shaders for it are an
   optimisation for later.
-- Not yet measured on real NVIDIA/AMD/Intel/Apple GPUs (CI has none).
+- Measured on AMD RDNA4 only; NVIDIA/Apple may prefer other tile sizes. A
+  per-device calibration pass (cache best tile per device+model) is the
+  long-term fix.
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
 - HDR10 *static* metadata on hardware encoders is tags-only (warned in the UI);

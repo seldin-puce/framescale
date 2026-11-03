@@ -123,7 +123,10 @@ Model::Model(int32_t gpu, bool fp16, int32_t threads) : net_(new ncnn::Net), gpu
     o.use_vulkan_compute = gpu >= 0;
     o.use_fp16_packed = fp16;
     o.use_fp16_storage = fp16;
-    o.use_fp16_arithmetic = false;  // fp16 accumulation visibly bands SR output
+    // FP16 *arithmetic* measured on RX 9070 XT / Mesa 26.2: SR got slower
+    // (matrix cores already run the convolutions in FP16) and max error reached
+    // 231/255 (visible artifacts). Storage stays FP16; math stays FP32.
+    o.use_fp16_arithmetic = false;
     o.use_int8_storage = false;
     o.lightmode = true;
     if (gpu >= 0) net_->set_vulkan_device(gpu);
@@ -141,7 +144,7 @@ void Model::load(rust::Str param, rust::Str bin) {
 }
 
 void Model::run_sr(rust::Slice<const float> input, int32_t w, int32_t h, rust::Slice<float> output,
-                   int32_t out_w, int32_t out_h) {
+                   int32_t out_w, int32_t out_h) const {
     if (input.size() != (size_t)w * h * 3 || output.size() != (size_t)out_w * out_h * 3)
         throw std::runtime_error("run_sr: buffer size mismatch");
     ncnn::Extractor ex = net_->create_extractor();
@@ -154,7 +157,7 @@ void Model::run_sr(rust::Slice<const float> input, int32_t w, int32_t h, rust::S
 }
 
 void Model::run_rife(rust::Slice<const float> a, rust::Slice<const float> b, int32_t w, int32_t h, float t,
-                     rust::Slice<float> output) {
+                     rust::Slice<float> output) const {
     const size_t n = (size_t)w * h * 3;
     if (a.size() != n || b.size() != n || output.size() != n) throw std::runtime_error("run_rife: buffer size mismatch");
     ncnn::Mat ts(w, h, 1);

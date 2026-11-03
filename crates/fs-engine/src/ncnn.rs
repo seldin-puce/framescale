@@ -38,7 +38,7 @@ mod ffi {
         fn model_new(gpu: i32, fp16: bool, threads: i32) -> Result<UniquePtr<Model>>;
         fn load(self: Pin<&mut Model>, param: &str, bin: &str) -> Result<()>;
         fn run_sr(
-            self: Pin<&mut Model>,
+            self: &Model,
             input: &[f32],
             w: i32,
             h: i32,
@@ -47,7 +47,7 @@ mod ffi {
             out_h: i32,
         ) -> Result<()>;
         fn run_rife(
-            self: Pin<&mut Model>,
+            self: &Model,
             a: &[f32],
             b: &[f32],
             w: i32,
@@ -60,9 +60,11 @@ mod ffi {
 
 pub use ffi::GpuEntry;
 
-// SAFETY: an ncnn::Net may be used from any single thread at a time. The
-// backend owns its models exclusively and is moved, never shared.
+// SAFETY: after loading, a model is only used through `run_*`, which are
+// `const` and create a fresh ncnn::Extractor per call. Concurrent extractors on
+// one ncnn::Net are supported by ncnn. Loading takes `Pin<&mut>` (exclusive).
 unsafe impl Send for ffi::Model {}
+unsafe impl Sync for ffi::Model {}
 
 /// Create ncnn's Vulkan instance (once per process). Returns the GPU count, or
 /// a negative value when Vulkan is unavailable (the CPU path still works).
@@ -105,6 +107,9 @@ struct Sr {
 
 pub struct NcnnBackend {
     sr: Option<Sr>,
+    /// Reused SR output buffer (resized on demand).
+    scratch: Planar,
+    gpu: bool,
     rife: Option<UniquePtr<ffi::Model>>,
     device_name: String,
     max_tile: u32,
@@ -222,17 +227,22 @@ impl NcnnBackend {
             }
         }
         // Starting tile; the TileController halves it on OOM and remembers.
+        // Measured on RX 9070 XT (RADV): small tiles win. With two in-flight
+        // tiles the working set stays cache-resident. AnimeVideo-v3 1080p→4K:
+        // 512 px 6.9 fps → 256 px 10.8 fps; x4plus: 400 px 1.0 → 192 px 1.27 fps.
+        // A per-device calibration pass can refine this later.
         let gib = device.vram_bytes.unwrap_or(0) >> 30;
         let max_tile = match (device.index >= 0, heavy, gib) {
             (false, _, _) => 128,
-            (true, true, g) if g >= 8 => 400,
-            (true, true, g) if g >= 4 => 256,
+            (true, true, g) if g >= 4 => 192,
             (true, true, _) => 128,
-            (true, false, g) if g >= 4 => 512,
-            (true, false, _) => 256,
+            (true, false, g) if g >= 2 => 256,
+            (true, false, _) => 192,
         };
         Ok(Self {
             sr,
+            scratch: Planar::zeros(1, 1),
+            gpu: device.index >= 0,
             rife,
             device_name: device.name,
             max_tile,
@@ -254,32 +264,45 @@ impl InferenceBackend for NcnnBackend {
     }
 
     fn process(&mut self, input: &Frame, tile: u32) -> Result<Frame, EngineError> {
-        let Some(sr) = self.sr.as_mut() else {
+        let Some(sr) = self.sr.as_ref() else {
             return Ok(input.clone());
         };
         let img = planar::from_frame(input);
-        let native = sr.native;
-        let out = planar::tiled(&img, tile as usize, SR_PAD, native, |t| {
-            let mut o = Planar::zeros(t.w * native, t.h * native);
-            sr.model
-                .pin_mut()
-                .run_sr(
-                    &t.data,
-                    t.w as i32,
-                    t.h as i32,
-                    &mut o.data,
-                    o.w as i32,
-                    o.h as i32,
-                )
-                .map_err(|e| map_err(&e, tile))?;
-            Ok(o)
-        })?;
-        let out = if sr.target == native {
-            out
+        let (native, model) = (sr.native, &sr.model);
+        // Two in-flight tiles keep the GPU busy while the CPU slices/stitches;
+        // the output buffer is reused across frames (no 100 MB page-faulting).
+        let workers = if self.gpu { 2 } else { 1 };
+        planar::tiled_into(
+            &img,
+            tile as usize,
+            SR_PAD,
+            native,
+            workers,
+            &mut self.scratch,
+            |t| {
+                let mut o = Planar::zeros(t.w * native, t.h * native);
+                model
+                    .run_sr(
+                        &t.data,
+                        t.w as i32,
+                        t.h as i32,
+                        &mut o.data,
+                        o.w as i32,
+                        o.h as i32,
+                    )
+                    .map_err(|e| map_err(&e, tile))?;
+                Ok(o)
+            },
+        )?;
+        let frame = if sr.target == native {
+            planar::to_frame(&self.scratch, input.format)
         } else {
-            planar::area_resample(&out, img.w * sr.target, img.h * sr.target)
+            planar::to_frame(
+                &planar::area_resample(&self.scratch, img.w * sr.target, img.h * sr.target),
+                input.format,
+            )
         };
-        Ok(planar::to_frame(&out, input.format))
+        Ok(frame)
     }
 
     fn interpolate(
@@ -289,7 +312,7 @@ impl InferenceBackend for NcnnBackend {
         t: f32,
         tile: u32,
     ) -> Result<Frame, EngineError> {
-        let Some(rife) = self.rife.as_mut() else {
+        let Some(rife) = self.rife.as_ref() else {
             return Err(EngineError::Internal(
                 "interpolation requested but RIFE is not loaded".into(),
             ));
@@ -302,8 +325,7 @@ impl InferenceBackend for NcnnBackend {
         let pa = planar::pad_to_multiple(&planar::from_frame(a), RIFE_ALIGN);
         let pb = planar::pad_to_multiple(&planar::from_frame(b), RIFE_ALIGN);
         let mut o = Planar::zeros(pa.w, pa.h);
-        rife.pin_mut()
-            .run_rife(&pa.data, &pb.data, pa.w as i32, pa.h as i32, t, &mut o.data)
+        rife.run_rife(&pa.data, &pb.data, pa.w as i32, pa.h as i32, t, &mut o.data)
             .map_err(|e| map_err(&e, tile))?;
         Ok(planar::to_frame(
             &o.region(0, 0, a.width as usize, a.height as usize),
