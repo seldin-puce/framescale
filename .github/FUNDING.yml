@@ -1,0 +1,4 @@
+# Shows a "Sponsor" button on the GitHub repository.
+# Fill in your handles (and the same URLs in apps/desktop/src/lib/links.ts).
+# github: [your-github-username]
+# ko_fi: your-kofi-username

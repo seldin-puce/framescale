@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Backend, HardwareInfo, LicenseInfo, ProbeResult } from "./backend";
+import type { Backend, HardwareInfo, ProbeResult } from "./backend";
 
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
 
@@ -21,10 +21,8 @@ export const tauriBackend: Backend = {
   cancelJob: (id) => invoke("cancel_job", { id }),
   removeJob: (id) => invoke("remove_job", { id }),
   reorderJobs: (order) => invoke("reorder_jobs", { order }),
-  getLicense: () => invoke<LicenseInfo>("get_license"),
-  activateLicense: (token) => invoke<LicenseInfo>("activate_license", { token }),
   setEcoMode: (mode) => invoke("set_eco_mode", { mode }),
-  renderPreview: (path, atS, pipeline) => invoke("render_preview", { path, atS, pipeline }),
+  renderPreview: (path, atS, seconds, pipeline) => invoke("render_preview", { path, atS, seconds, pipeline }),
   thumbnail: (path) => invoke("thumbnail", { path }),
   // Custom protocols are `scheme://localhost/…` on macOS/Linux and
   // `http://scheme.localhost/…` on Windows (WebView2).

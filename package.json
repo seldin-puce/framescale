@@ -1,8 +1,11 @@
 {
   "name": "framescale",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@12.16.1",
-  "engines": { "node": ">=22.12" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "dev": "pnpm --filter @framescale/desktop tauri dev",
     "build": "pnpm --filter @framescale/desktop tauri build",

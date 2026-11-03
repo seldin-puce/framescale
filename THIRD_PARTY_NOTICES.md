@@ -1,7 +1,8 @@
 # Third-Party Notices — FrameScale AI
 
-FrameScale AI bundles the following third-party components. Their licenses
-apply to those components only. This file ships inside the application bundle.
+FrameScale AI itself is licensed under the GNU General Public License v3.0 or
+later (see LICENSE). It bundles the following third-party components, whose
+own licenses apply to those components. This file ships inside the application bundle.
 
 > Before the first release, replace this hand-maintained list with generated
 > output (`cargo about` for Rust crates plus a pnpm license report) and keep

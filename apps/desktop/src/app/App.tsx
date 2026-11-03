@@ -5,6 +5,12 @@ import { pushTelemetry } from "@/stores/telemetry";
 import { AppShell } from "@/components/shell/AppShell";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 
+// Dev builds only: expose the store for WebDriver end-to-end automation (native
+// file dialogs can't be scripted). Stripped from production bundles.
+if (import.meta.env.DEV) {
+  (window as unknown as { __FS_STORE__: typeof useApp }).__FS_STORE__ = useApp;
+}
+
 // Module-level guard: StrictMode runs effects twice in development.
 let seeded = false;
 

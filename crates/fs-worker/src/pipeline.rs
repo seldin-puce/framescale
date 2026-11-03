@@ -59,7 +59,6 @@ impl Fatal {
         match self.kind {
             FailureKind::DiskFull => exit::DISK_FULL,
             FailureKind::DeviceLost => exit::DEVICE_LOST,
-            FailureKind::LicenseRequired => exit::LICENSE,
             _ => exit::FATAL,
         }
     }

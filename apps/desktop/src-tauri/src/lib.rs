@@ -75,8 +75,6 @@ pub fn run() {
             commands::cancel_job,
             commands::remove_job,
             commands::reorder_jobs,
-            commands::get_license,
-            commands::activate_license,
             commands::set_eco_mode,
             commands::disk_free,
             commands::render_preview,

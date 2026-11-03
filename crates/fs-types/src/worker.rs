@@ -22,7 +22,6 @@ pub mod exit {
     pub const DISK_FULL: i32 = 4;
     /// Clean stop after a checkpoint (hard pause / stop request).
     pub const STOPPED: i32 = 5;
-    pub const LICENSE: i32 = 6;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,8 +171,6 @@ pub struct WorkerJob {
     pub job: JobId,
     pub plan: RenderPlan,
     pub start: StartPoint,
-    /// Raw license token. The worker verifies it itself.
-    pub license_token: Option<String>,
     /// Governor duty cycle (0.1–1.0).
     pub duty: f32,
     /// Preview mode: render only `frames` input frames to JPEG sequences

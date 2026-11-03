@@ -9,7 +9,7 @@ use fs_hw::VulkanContext;
 use fs_journal::Journal;
 use fs_media::encoders::{EncoderEnv, Os};
 use fs_proc::Ledger;
-use fs_types::{Entitlements, GpuDevice, JobEvent, JobId, Telemetry};
+use fs_types::{GpuDevice, JobEvent, JobId, Telemetry};
 use tokio::sync::{Notify, broadcast, watch};
 
 use crate::paths::Paths;
@@ -39,9 +39,6 @@ pub struct AppState {
     /// Signalled when hardware discovery / encoder probing completes.
     pub hw_ready: Notify,
     pub settings: Mutex<Settings>,
-    pub license_token: RwLock<Option<String>>,
-    pub entitlements: RwLock<Entitlements>,
-    pub dev_license_key: bool,
     pub active: Mutex<Option<ActiveJob>>,
     /// Wakes the queue loop (new job, resume, reorder…).
     pub queue_changed: Notify,
@@ -84,22 +81,6 @@ impl AppState {
             );
         }
 
-        // 3. License: verified here for the UI. The worker re-verifies on its own.
-        let verifier = fs_license::Verifier::embedded();
-        let token = std::fs::read_to_string(&paths.license)
-            .ok()
-            .map(|s| s.trim().to_owned());
-        let device = fs_license::machine_fingerprint();
-        let (ent, err) = verifier.resolve(token.as_deref(), now_secs(), device.as_deref());
-        if let Some(e) = err {
-            tracing::warn!(error = %e, "stored license rejected; running as Free");
-        }
-        if verifier.is_dev_key() {
-            tracing::warn!(
-                "built with the DEVELOPMENT license key; set FS_LICENSE_PUBKEY for releases"
-            );
-        }
-
         let (job_events, _) = broadcast::channel(512);
         let (telemetry, _) = watch::channel(Telemetry::default());
         Ok(Arc::new(Self {
@@ -109,9 +90,6 @@ impl AppState {
             ledger,
             hw: RwLock::new(Hardware::default()),
             hw_ready: Notify::new(),
-            license_token: RwLock::new(token),
-            entitlements: RwLock::new(ent),
-            dev_license_key: verifier.is_dev_key(),
             active: Mutex::new(None),
             queue_changed: Notify::new(),
             job_events,
@@ -161,11 +139,16 @@ impl AppState {
             }
 
             // Encoder probe for the selected device's vendor.
-            let vendor = me.selected_device_in(&hw.devices).map(|d| d.vendor);
+            let selected = me.selected_device_in(&hw.devices);
+            let vendor = selected.map(|d| d.vendor);
+            let vaapi = selected
+                .and_then(|d| d.drm_render_minor)
+                .map(|m| format!("/dev/dri/renderD{m}"));
             let candidates = fs_media::encoders::all_candidates(Os::current(), vendor);
             hw.encoders = Some(fs_media::encoders::probe_usable(
                 &me.paths.ffmpeg,
                 &candidates,
+                vaapi.as_deref(),
             ));
             tracing::info!(encoders = ?hw.encoders, "usable encoders");
 
@@ -207,13 +190,6 @@ impl AppState {
                 .and_then(|d| d.drm_render_minor)
                 .map(|m| format!("/dev/dri/renderD{m}")),
         }
-    }
-
-    pub fn entitlements(&self) -> Entitlements {
-        self.entitlements
-            .read()
-            .map(|e| e.clone())
-            .unwrap_or_else(|_| Entitlements::free())
     }
 
     pub fn emit(&self, ev: JobEvent) {

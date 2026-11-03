@@ -68,7 +68,6 @@ async fn preview_and_thumbnail() {
         models_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/models"),
         device: None,
-        license_token: None,
     };
     let m = |id: &str| ModelRef {
         id: id.into(),
@@ -88,7 +87,7 @@ async fn preview_and_thumbnail() {
         ],
     };
     let root = dir.join("previews");
-    let r = preview::render(&tools, &sdr, 2.0, &pipeline, &root)
+    let r = preview::render(&tools, &sdr, 2.0, 2.0, &pipeline, &root)
         .await
         .expect("preview");
     eprintln!("{r:?}");
@@ -104,7 +103,7 @@ async fn preview_and_thumbnail() {
     assert!(std::fs::metadata(&first).expect("jpeg").len() > 1000);
 
     // Near the end: the window is clamped so a full 2 s still renders.
-    let late = preview::render(&tools, &sdr, 5.9, &pipeline, &root)
+    let late = preview::render(&tools, &sdr, 5.9, 2.0, &pipeline, &root)
         .await
         .expect("late");
     assert_eq!(late.before_frames, 48);
@@ -115,11 +114,17 @@ async fn preview_and_thumbnail() {
             scale: 2,
         }],
     };
-    let h = preview::render(&tools, &hdr, 0.0, &up, &root)
+    let h = preview::render(&tools, &hdr, 0.0, 2.0, &up, &root)
         .await
         .expect("hdr preview");
     assert!(h.tone_mapped);
     assert_eq!(h.after_frames, h.before_frames);
+
+    // A single-frame "still" (shown first while the full 2 s renders).
+    let still = preview::render(&tools, &sdr, 3.0, 0.0, &up, &root)
+        .await
+        .expect("still");
+    assert_eq!((still.before_frames, still.after_frames), (1, 1));
 
     preview::prune(&root, 1);
     assert_eq!(std::fs::read_dir(&root).expect("rd").count(), 1);

@@ -15,6 +15,7 @@ This is the condensed reference copy of the Phase 1 design. Decisions marked
 | D6 | FFmpeg licensing | Linking libav* or bundling GPL encoders creates obligations | FFmpeg runs as a **separate process**, **LGPL build** + hardware encoders + SVT-AV1/dav1d/zimg. CI gate rejects `--enable-gpl` / `--enable-nonfree`. |
 | D7 | ProRes everywhere | `prores_ks` is an unlicensed reverse-engineered implementation | ProRes only via `prores_videotoolbox` on macOS. |
 | D8 | Repo tooling | — | pnpm workspace + Cargo workspace (+ `cargo xtask`). |
+| **D9** | Freemium + Pro licensing | **Superseded (2026-11-03):** FrameScale is free and open source under **GPL-3.0-or-later**, funded by optional donations (GitHub Sponsors, Ko-fi). | The Ed25519 token layer, Pro gates, activation modal and worker feature checks were removed. All features for everyone. Phase 4 now covers community growth and release distribution instead of Pro conversion. |
 
 ## 1. Process architecture
 
@@ -92,4 +93,4 @@ Crates: `fs-types`, `fs-hw`, `fs-media`, `fs-proc`, `fs-license`, `fs-journal`, 
 
 - **Pause:** soft (backpressure) or hard (checkpoint + exit).
 - **Temp janitor:** deletes a job dir only if it's unlocked, not resumable, and older than 24 h.
-- **Licensing:** Ed25519 token verified by the core **and** independently by the worker. BYOM accepts ncnn/ONNX only, never pickles. The shell plugin is not exposed to JS. Updater uses minisign.
+- **Licensing:** ~~Ed25519 Pro tokens~~ removed by D9 (GPL-3.0, no feature gates). BYOM accepts ncnn/ONNX only, never pickles. The shell plugin is not exposed to JS. Updater uses minisign.

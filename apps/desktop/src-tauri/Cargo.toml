@@ -21,7 +21,6 @@ fs-types   = { workspace = true }
 fs-hw      = { workspace = true }
 fs-media   = { workspace = true }
 fs-proc    = { workspace = true }
-fs-license = { workspace = true }
 fs-journal = { workspace = true }
 fs-core    = { workspace = true }
 

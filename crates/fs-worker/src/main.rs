@@ -14,7 +14,6 @@ mod pipeline;
 mod writer;
 
 use std::io::BufRead;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs_types::FailureKind;
 use fs_types::worker::{PROTOCOL_VERSION, WorkerCommand, WorkerEvent, exit};
@@ -89,27 +88,6 @@ fn run() -> i32 {
                 job.protocol
             ),
             exit::USAGE,
-        );
-    }
-
-    // Authoritative license gate: verify the token ourselves, against the plan
-    // we are about to execute.
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let verifier = fs_license::Verifier::embedded();
-    let device = fs_license::machine_fingerprint();
-    let (ent, _err) = verifier.resolve(job.license_token.as_deref(), now, device.as_deref());
-    let missing: Vec<_> = fs_license::required_features(&job.plan)
-        .into_iter()
-        .filter(|f| !ent.has(*f))
-        .collect();
-    if !missing.is_empty() {
-        return fatal(
-            &emit,
-            FailureKind::LicenseRequired,
-            format!("Pro features required: {missing:?}"),
-            exit::LICENSE,
         );
     }
 

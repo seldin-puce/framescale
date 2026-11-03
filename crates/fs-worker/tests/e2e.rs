@@ -186,7 +186,6 @@ fn run_worker(plan: &RenderPlan, start: StartPoint, stop_after_ready: bool) -> R
         job: JobId::new(),
         plan: plan.clone(),
         start,
-        license_token: None,
         duty: 1.0,
         preview: None,
     };

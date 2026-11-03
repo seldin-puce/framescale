@@ -1,12 +1,20 @@
 import type { Container, VideoCodec } from "@framescale/ipc-types";
-import { useApp } from "@/stores/app";
-import { ProGate } from "../pro/ProGate";
+import { CODEC_ENCODERS, useApp } from "@/stores/app";
 import { Tooltip } from "../ui/Tooltip";
 
+const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+
 const CODECS: { value: VideoCodec; label: string; encoders: string[] }[] = [
-  { value: "hevc10", label: "HEVC 10-bit", encoders: ["hevc_nvenc", "hevc_amf", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "libkvazaar"] },
-  { value: "av1", label: "AV1 10-bit", encoders: ["av1_nvenc", "av1_amf", "av1_qsv", "av1_vaapi", "libsvtav1"] },
-  { value: "h264", label: "H.264 (compat)", encoders: ["h264_nvenc", "h264_amf", "h264_qsv", "h264_vaapi", "h264_videotoolbox", "libopenh264"] },
+  { value: "hevc10", label: "HEVC 10-bit", encoders: CODEC_ENCODERS.hevc10 },
+  { value: "av1", label: "AV1 10-bit", encoders: CODEC_ENCODERS.av1 },
+  { value: "h264", label: "H.264 (compat)", encoders: CODEC_ENCODERS.h264 },
+  // ProRes only through Apple's own VideoToolbox encoder (licensed by the OS).
+  ...(IS_MAC
+    ? [
+        { value: "proRes422Hq" as const, label: "ProRes 422 HQ", encoders: ["prores_videotoolbox"] },
+        { value: "proRes4444" as const, label: "ProRes 4444", encoders: ["prores_videotoolbox"] },
+      ]
+    : []),
 ];
 
 // Stable fallback: a fresh `[]` inside a selector would re-render forever.
@@ -27,7 +35,8 @@ export function OutputSettings() {
         <select aria-label="Video codec" className={selectCls} value={output.codec} onChange={(e) => setOutput({ codec: e.target.value as VideoCodec })}>
           {CODECS.map((c) => (
             <option key={c.value} value={c.value} disabled={!available(c)}>
-              {c.label}{hw(c) ? " · GPU" : available(c) ? " · CPU" : " · unavailable"}
+              {c.label}
+              {hw(c) ? " · GPU" : c.value === "hevc10" && available(c) ? " · CPU, 8-bit SDR only" : available(c) ? " · CPU" : " · unavailable"}
             </option>
           ))}
         </select>
@@ -37,11 +46,6 @@ export function OutputSettings() {
           <option value="mov">MOV</option>
         </select>
       </div>
-      <ProGate feature="proResOutput">
-        <button type="button" className="w-full rounded-sm border border-border-strong bg-black/20 px-2 py-1.5 text-left text-xs text-fg-muted">
-          Apple ProRes 422 HQ / 4444 <span className="text-fg-subtle">(macOS)</span>
-        </button>
-      </ProGate>
       <label className="flex flex-col gap-1">
         <span className="flex justify-between text-[11px] text-fg-muted">
           <span>Quality</span>

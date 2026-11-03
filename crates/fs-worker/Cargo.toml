@@ -21,7 +21,6 @@ fs-types          = { workspace = true }
 fs-engine         = { workspace = true }
 fs-media          = { workspace = true }
 fs-proc           = { workspace = true }
-fs-license        = { workspace = true }
 fs-hw             = { workspace = true }
 serde_json        = { workspace = true }
 crossbeam-channel = { workspace = true }

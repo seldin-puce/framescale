@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { backend } from "@/ipc";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/stores/app";
-import { ProBadge } from "../ui/ProBadge";
 import { DraftRow, JobRow } from "./QueueItem";
 
 function DropZone({ hover }: { hover: boolean }) {
@@ -35,7 +34,6 @@ export function QueueSidebar() {
   const renderAll = useApp((s) => s.renderAll);
   const addFiles = useApp((s) => s.addFiles);
   const fail = useApp((s) => s.fail);
-  const unlimited = useApp((s) => s.has("batchUnlimited"));
   const [hover, setHover] = useState(false);
 
   useEffect(() => {
@@ -70,7 +68,7 @@ export function QueueSidebar() {
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
         <h2 className="text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Queue</h2>
         <span className="tabular font-mono text-[10px] text-fg-subtle">
-          {active} active{!unlimited && " · max 3"}
+          {active} active
         </span>
       </div>
       <div className="px-3">
@@ -92,7 +90,6 @@ export function QueueSidebar() {
           <>
             <div className="flex items-center justify-between px-1.5 pt-3 pb-1 text-[10px] font-medium text-fg-subtle uppercase">
               <span>Jobs</span>
-              {!useApp.getState().has("batchReorder") && <ProBadge className="scale-90" />}
             </div>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void onDragEnd(e)}>
               <SortableContext items={shown.map((j) => j.id)} strategy={verticalListSortingStrategy}>

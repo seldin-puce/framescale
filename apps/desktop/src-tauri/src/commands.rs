@@ -5,16 +5,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fs_core::JobCommand;
-use fs_types::license::FREE_BATCH_LIMIT;
 use fs_types::{
-    DeviceUuid, EcoMode, Entitlements, Feature, GpuDevice, JobEvent, JobId, JobSpec, JobState,
-    JobSummary, MediaInfo, PauseMode, Telemetry,
+    DeviceUuid, EcoMode, GpuDevice, JobEvent, JobId, JobSpec, JobState, JobSummary, MediaInfo,
+    PauseMode, Telemetry,
 };
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
 
-use crate::state::{AppState, now_secs};
+use crate::state::AppState;
 
 type S<'a> = State<'a, Arc<AppState>>;
 
@@ -24,8 +23,6 @@ type S<'a> = State<'a, Arc<AppState>>;
 pub struct CmdError {
     pub code: &'static str,
     pub message: String,
-    /// Set when the action needs a Pro feature (opens the activation modal).
-    pub feature: Option<Feature>,
 }
 
 type R<T> = Result<T, CmdError>;
@@ -34,15 +31,6 @@ fn err(code: &'static str, message: impl Into<String>) -> CmdError {
     CmdError {
         code,
         message: message.into(),
-        feature: None,
-    }
-}
-
-fn pro(feature: Feature, message: &str) -> CmdError {
-    CmdError {
-        code: "proRequired",
-        message: message.into(),
-        feature: Some(feature),
     }
 }
 
@@ -137,36 +125,8 @@ pub async fn probe_media(state: S<'_>, paths: Vec<String>) -> R<Vec<ProbeResult>
 
 #[tauri::command]
 pub fn enqueue_jobs(state: S<'_>, specs: Vec<JobSpec>) -> R<Vec<JobId>> {
-    let ent = state.entitlements();
-    let pending = journal(&state, |j| j.list_jobs())?
-        .iter()
-        .filter(|j| !j.state.is_terminal())
-        .count();
-    if !ent.has(Feature::BatchUnlimited) && pending + specs.len() > FREE_BATCH_LIMIT {
-        return Err(pro(
-            Feature::BatchUnlimited,
-            &format!("the free tier queues up to {FREE_BATCH_LIMIT} videos at once"),
-        ));
-    }
     for spec in &specs {
-        if let Some(s) = spec.pipeline.stages.iter().find(|s| {
-            matches!(
-                s,
-                fs_types::StageConfig::Denoise { .. } | fs_types::StageConfig::FaceFix { .. }
-            )
-        }) {
-            return Err(err(
-                "unsupported",
-                format!("{:?} isn't available in this build yet", s.kind()),
-            ));
-        }
-        if let Err(errors) = spec.pipeline.validate() {
-            return Err(err("invalidPipeline", format!("{errors:?}")));
-        }
-        // Early, friendly gate. The worker repeats it against the compiled plan.
-        if let Some(f) = ent.missing_for(spec, 0, 0).first() {
-            return Err(pro(*f, "this pipeline uses a Pro feature"));
-        }
+        reject_unsupported(&spec.pipeline)?;
     }
     let mut ids = Vec::with_capacity(specs.len());
     for spec in &specs {
@@ -207,42 +167,45 @@ pub async fn render_preview(
     state: S<'_>,
     path: String,
     at_s: f64,
+    seconds: f64,
     pipeline: fs_types::PipelineSpec,
 ) -> R<fs_types::PreviewResult> {
     reject_unsupported(&pipeline)?;
-    let probe_spec = JobSpec {
-        input: path.clone(),
-        pipeline: pipeline.clone(),
-        output: fs_types::OutputSpec {
-            path: String::new(),
-            codec: fs_types::VideoCodec::Av1,
-            container: fs_types::Container::Mkv,
-            quality: 30,
-            encoder: fs_types::EncoderPreference::Auto,
-        },
-        device: None,
-    };
-    if let Some(f) = state.entitlements().missing_for(&probe_spec, 0, 0).first() {
-        return Err(pro(*f, "this pipeline uses a Pro feature"));
-    }
     let tools = fs_core::preview::PreviewTools {
         ffmpeg: state.paths.ffmpeg.clone(),
         ffprobe: state.paths.ffprobe.clone(),
         worker: state.paths.worker.clone(),
         models_dir: state.paths.models.clone(),
         device: state.selected_device(),
-        license_token: state.license_token.read().ok().and_then(|t| t.clone()),
     };
-    fs_core::preview::prune(&state.paths.previews, 4);
-    fs_core::preview::render(
+    fs_core::preview::prune(&state.paths.previews, 6);
+    tracing::info!(%path, at_s, seconds, stages = pipeline.stages.len(), "rendering preview");
+    let res = fs_core::preview::render(
         &tools,
-        &PathBuf::from(path),
+        &PathBuf::from(&path),
         at_s,
+        seconds,
         &pipeline,
         &state.paths.previews,
     )
-    .await
-    .map_err(|e| err("preview", e))
+    .await;
+    match res {
+        Ok(r) => {
+            tracing::info!(
+                frames = r.after_frames,
+                w = r.width,
+                h = r.height,
+                ms = r.elapsed_ms,
+                device = ?r.device,
+                "preview ready"
+            );
+            Ok(r)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "preview failed");
+            Err(err("preview", e))
+        }
+    }
 }
 
 /// Cached JPEG thumbnail; returns its `fs://` path (e.g. `thumbs/<key>.jpg`).
@@ -251,11 +214,14 @@ pub async fn thumbnail(state: S<'_>, path: String) -> R<String> {
     fs_core::preview::thumbnail(
         &state.paths.ffmpeg,
         &state.paths.ffprobe,
-        &PathBuf::from(path),
+        &PathBuf::from(&path),
         &state.paths.thumbs,
     )
     .await
-    .map_err(|e| err("thumbnail", e))
+    .map_err(|e| {
+        tracing::warn!(%path, error = %e, "thumbnail failed");
+        err("thumbnail", e)
+    })
 }
 
 #[tauri::command]
@@ -336,50 +302,9 @@ pub fn remove_job(state: S<'_>, id: JobId) -> R<()> {
 
 #[tauri::command]
 pub fn reorder_jobs(state: S<'_>, order: Vec<JobId>) -> R<()> {
-    if !state.entitlements().has(Feature::BatchReorder) {
-        return Err(pro(
-            Feature::BatchReorder,
-            "reordering the queue is a Pro feature",
-        ));
-    }
     journal(&state, |j| j.reorder(&order))?;
     state.queue_changed.notify_one();
     Ok(())
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LicenseInfo {
-    pub entitlements: Entitlements,
-    pub development_key: bool,
-}
-
-#[tauri::command]
-pub fn get_license(state: S<'_>) -> LicenseInfo {
-    LicenseInfo {
-        entitlements: state.entitlements(),
-        development_key: state.dev_license_key,
-    }
-}
-
-#[tauri::command]
-pub fn activate_license(state: S<'_>, token: String) -> R<LicenseInfo> {
-    let verifier = fs_license::Verifier::embedded();
-    let device = fs_license::machine_fingerprint();
-    let ent = verifier
-        .verify(token.trim(), now_secs(), device.as_deref())
-        .map_err(|e| err("licenseInvalid", e.to_string()))?;
-    if let Some(dir) = state.paths.license.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| err("io", e.to_string()))?;
-    }
-    std::fs::write(&state.paths.license, token.trim()).map_err(|e| err("io", e.to_string()))?;
-    if let Ok(mut t) = state.license_token.write() {
-        *t = Some(token.trim().to_owned());
-    }
-    if let Ok(mut e) = state.entitlements.write() {
-        *e = ent;
-    }
-    Ok(get_license(state))
 }
 
 #[tauri::command]

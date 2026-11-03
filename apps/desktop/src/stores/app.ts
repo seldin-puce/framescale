@@ -1,8 +1,6 @@
 import type {
   Container,
   EcoMode,
-  Entitlements,
-  Feature,
   JobEvent,
   JobId,
   JobProgress,
@@ -17,6 +15,7 @@ import type {
 import { create } from "zustand";
 import { backend, isCmdError, type HardwareInfo } from "@/ipc";
 import { outputPathFor } from "@/lib/format";
+import { supportNudge } from "@/lib/support";
 
 /* ------------------------------------------------------------------------- */
 /* Pipeline model (UI-side); converted to the Rust `PipelineSpec` on submit.  */
@@ -67,13 +66,6 @@ const defaults = (enabled: boolean, model: string): StageState => ({
   sendField: true,
 });
 
-/** Pro features a stage configuration needs (UI hint only; Rust enforces). */
-export function stageFeature(kind: StageKind, s: StageState): Feature | null {
-  if (kind === "faceFix") return "faceFix";
-  if (kind === "interpolate" && s.factor > 2) return "interpolateHighFactor";
-  return null;
-}
-
 export function toStageConfigs(stages: Record<StageKind, StageState>): StageConfig[] {
   const out: StageConfig[] = [];
   for (const kind of STAGE_ORDER) {
@@ -103,6 +95,23 @@ export function toStageConfigs(stages: Record<StageKind, StageState>): StageConf
 
 /* ------------------------------------------------------------------------- */
 
+/** Encoders per codec family, hardware first (mirrors fs-media::encoders). */
+export const CODEC_ENCODERS: Record<"hevc10" | "av1" | "h264", string[]> = {
+  hevc10: ["hevc_nvenc", "hevc_amf", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "libkvazaar"],
+  av1: ["av1_nvenc", "av1_amf", "av1_qsv", "av1_vaapi", "libsvtav1"],
+  h264: ["h264_nvenc", "h264_amf", "h264_qsv", "h264_vaapi", "h264_videotoolbox", "libopenh264"],
+};
+
+export const hasHardware = (codec: keyof typeof CODEC_ENCODERS, usable: string[]) =>
+  CODEC_ENCODERS[codec].some((e) => !e.startsWith("lib") && usable.includes(e));
+
+/** Best default: hardware HEVC, else hardware AV1, else SVT-AV1 (always present). */
+export function preferredCodec(usable: string[]): VideoCodec {
+  if (hasHardware("hevc10", usable)) return "hevc10";
+  if (hasHardware("av1", usable)) return "av1";
+  return "av1";
+}
+
 export interface Draft {
   path: string;
   info: MediaInfo | null;
@@ -115,7 +124,11 @@ export interface PreviewState {
   path: string | null;
   result: PreviewResult | null;
   error: string | null;
+  /** A single-frame still is shown while the full 2 s renders. */
+  refining: boolean;
 }
+
+let previewToken = 0;
 
 export type CompareMode = "split" | "side" | "before" | "after";
 
@@ -127,8 +140,6 @@ export interface OutputState {
 
 interface AppStore {
   hardware: HardwareInfo | null;
-  entitlements: Entitlements;
-  developmentKey: boolean;
   drafts: Draft[];
   jobs: Record<JobId, JobSummary>;
   progress: Record<JobId, JobProgress>;
@@ -137,9 +148,14 @@ interface AppStore {
   stages: Record<StageKind, StageState>;
   selectedStage: StageKind;
   output: OutputState;
+  /** The user picked output settings themselves: never auto-change them. */
+  outputTouched: boolean;
   eco: EcoMode;
   compareMode: CompareMode;
-  proModal: { open: boolean; feature: Feature | null };
+  /** About / support dialog. */
+  aboutOpen: boolean;
+  /** The occasional, dismissible "Enjoying FrameScale?" card after a render. */
+  nudge: boolean;
   toast: { kind: "error" | "info"; message: string } | null;
   preview: PreviewState;
 
@@ -155,20 +171,16 @@ interface AppStore {
   setOutput(patch: Partial<OutputState>): void;
   setEco(mode: EcoMode): Promise<void>;
   setCompareMode(m: CompareMode): void;
-  openPro(feature: Feature | null): void;
-  closePro(): void;
-  activate(token: string): Promise<string | null>;
+  setAboutOpen(open: boolean): void;
+  dismissNudge(): void;
   setDevice(uuid: string | null): Promise<void>;
   jobAction(id: JobId, action: "pause" | "hardPause" | "resume" | "cancel" | "remove"): Promise<void>;
   handleEvent(e: JobEvent): void;
-  has(f: Feature): boolean;
   fail(e: unknown): void;
 }
 
 export const useApp = create<AppStore>()((set, get) => ({
   hardware: null,
-  entitlements: { tier: "free", features: [], licensee: null, expiresAt: null },
-  developmentKey: false,
   drafts: [],
   jobs: {},
   progress: {},
@@ -183,11 +195,13 @@ export const useApp = create<AppStore>()((set, get) => ({
   },
   selectedStage: "upscale",
   output: { codec: "hevc10", container: "mp4", quality: 20 },
+  outputTouched: false,
   eco: { mode: "off" },
   compareMode: "split",
-  proModal: { open: false, feature: null },
+  aboutOpen: false,
+  nudge: false,
   toast: null,
-  preview: { status: "idle", path: null, result: null, error: null },
+  preview: { status: "idle", path: null, result: null, error: null, refining: false },
 
   selectedSource() {
     const { selected, drafts, jobs } = get();
@@ -201,30 +215,45 @@ export const useApp = create<AppStore>()((set, get) => ({
   async renderPreview(atS) {
     const src = get().selectedSource();
     if (!src) return;
-    set({ preview: { status: "rendering", path: src.path, result: null, error: null } });
+    // Heavy models take ~1 s/frame, so 2 s of video can take tens of seconds.
+    // Show one frame almost immediately, then swap in the full clip.
+    const token = ++previewToken;
+    const pipeline = { stages: toStageConfigs(get().stages) };
+    const current = () => token === previewToken && get().preview.path === src.path;
+    set({ preview: { status: "rendering", path: src.path, result: null, error: null, refining: false } });
     try {
-      const result = await backend.renderPreview(src.path, atS, { stages: toStageConfigs(get().stages) });
-      // Ignore a result for a clip that's no longer selected.
-      if (get().preview.path === src.path) set({ preview: { status: "ready", path: src.path, result, error: null } });
+      const still = await backend.renderPreview(src.path, atS, 0, pipeline);
+      if (!current()) return;
+      set({ preview: { status: "ready", path: src.path, result: still, error: null, refining: true } });
+      const full = await backend.renderPreview(src.path, atS, 2, pipeline);
+      if (!current()) return;
+      set({ preview: { status: "ready", path: src.path, result: full, error: null, refining: false } });
     } catch (e) {
+      if (!current()) return;
       const message = isCmdError(e) ? e.message : String(e);
-      set({ preview: { status: "error", path: src.path, result: null, error: message } });
+      const keep = get().preview.result;
+      set({ preview: { status: keep ? "ready" : "error", path: src.path, result: keep, error: message, refining: false } });
       get().fail(e);
     }
   },
 
   async init() {
-    const [license, jobs] = await Promise.all([backend.getLicense(), backend.listJobs()]);
-    set({
-      entitlements: license.entitlements,
-      developmentKey: license.developmentKey,
-      jobs: Object.fromEntries(jobs.map((j) => [j.id, j])),
-    });
+    const jobs = await backend.listJobs();
+    set({ jobs: Object.fromEntries(jobs.map((j) => [j.id, j])) });
     // Hardware discovery runs in the background on the Rust side; poll until ready.
     const poll = async () => {
       const hw = await backend.hardwareInfo();
       set({ hardware: hw });
-      if (!hw.ready) setTimeout(poll, 500);
+      if (!hw.ready) {
+        setTimeout(poll, 500);
+        return;
+      }
+      // Don't leave a default the machine can't encode in hardware (e.g. Fedora's
+      // Mesa ships VAAPI without H.264/HEVC, but AV1 works on RDNA3+).
+      const { output, outputTouched } = get();
+      if (!outputTouched && output.codec !== preferredCodec(hw.encoders)) {
+        set({ output: { ...output, codec: preferredCodec(hw.encoders) } });
+      }
     };
     void poll();
   },
@@ -281,23 +310,16 @@ export const useApp = create<AppStore>()((set, get) => ({
   select: (id) => set({ selected: id }),
   setStage: (kind, patch) => set((s) => ({ stages: { ...s.stages, [kind]: { ...s.stages[kind], ...patch } } })),
   selectStage: (kind) => set({ selectedStage: kind }),
-  setOutput: (patch) => set((s) => ({ output: { ...s.output, ...patch } })),
+  setOutput: (patch) => set((s) => ({ output: { ...s.output, ...patch }, outputTouched: true })),
   async setEco(mode) {
     set({ eco: mode });
     await backend.setEcoMode(mode);
   },
   setCompareMode: (m) => set({ compareMode: m }),
-  openPro: (feature) => set({ proModal: { open: true, feature } }),
-  closePro: () => set({ proModal: { open: false, feature: null } }),
-
-  async activate(token) {
-    try {
-      const l = await backend.activateLicense(token);
-      set({ entitlements: l.entitlements, developmentKey: l.developmentKey });
-      return null;
-    } catch (e) {
-      return isCmdError(e) ? e.message : String(e);
-    }
+  setAboutOpen: (open) => set({ aboutOpen: open }),
+  dismissNudge: () => {
+    supportNudge.dismissed();
+    set({ nudge: false });
   },
 
   async setDevice(uuid) {
@@ -337,7 +359,11 @@ export const useApp = create<AppStore>()((set, get) => ({
             void backend.listJobs().then((js) => set({ jobs: Object.fromEntries(js.map((j) => [j.id, j])) }));
             return {};
           }
-          return { jobs: { ...s.jobs, [e.job]: { ...job, state: e.state, error: e.reason } } };
+          return {
+            jobs: { ...s.jobs, [e.job]: { ...job, state: e.state, error: e.reason } },
+            // A finished render is the one moment a gentle "tip jar" note is welcome.
+            nudge: s.nudge || (e.state === "done" && supportNudge.due()),
+          };
         case "warning":
           return { warnings: { ...s.warnings, [e.job]: [...(s.warnings[e.job] ?? []), e.message] } };
         case "error":
@@ -346,13 +372,7 @@ export const useApp = create<AppStore>()((set, get) => ({
     });
   },
 
-  has: (f) => get().entitlements.features.includes(f),
-
   fail(e) {
-    if (isCmdError(e) && e.code === "proRequired") {
-      set({ proModal: { open: true, feature: e.feature } });
-    } else {
-      set({ toast: { kind: "error", message: isCmdError(e) ? e.message : String(e) } });
-    }
+    set({ toast: { kind: "error", message: isCmdError(e) ? e.message : String(e) } });
   },
 }));

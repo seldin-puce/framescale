@@ -258,18 +258,25 @@ pub fn concat_list<'a>(files: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 /// Quick capability probe: can this machine actually open `encoder`?
-/// (A build may list `av1_nvenc` on a GPU that can't encode AV1.)
-pub fn encoder_probe(encoder: &str, pix_fmt: &str) -> Argv {
+/// (A build may list `av1_nvenc` on a GPU that can't encode AV1, and a distro
+/// may ship VAAPI without H.264/HEVC.) 720p, because hardware encoders reject
+/// tiny frames (RDNA4 AV1 fails at 256×256 with EINVAL).
+pub fn encoder_probe(encoder: &str, pix_fmt: &str, vaapi_device: Option<&str>) -> Argv {
     let mut a = base("error");
-    a.args(["-f", "lavfi", "-i", "color=c=black:s=256x256:r=24:d=0.25"]);
-    a.args([
-        "-vf",
-        &format!("format={pix_fmt}"),
-        "-frames:v",
-        "4",
-        "-c:v",
-        encoder,
-    ]);
+    let vaapi = encoder.ends_with("_vaapi");
+    if vaapi {
+        a.args([
+            "-vaapi_device",
+            vaapi_device.unwrap_or("/dev/dri/renderD128"),
+        ]);
+    }
+    a.args(["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=0.25"]);
+    let vf = if vaapi {
+        format!("format={pix_fmt},hwupload")
+    } else {
+        format!("format={pix_fmt}")
+    };
+    a.args(["-vf", &vf, "-frames:v", "4", "-c:v", encoder]);
     a.args(["-f", "null", "-"]);
     a
 }

@@ -36,7 +36,7 @@ function Thumb({ path, info, hdr, ready }: { path: string; info: MediaInfo | nul
           {info.video.height >= 2160 ? "4K" : `${info.video.height}p`}
         </span>
       )}
-      {hdr && <span className="absolute top-0.5 left-0.5 rounded-[3px] bg-pro/90 px-1 text-[8px] font-bold leading-tight text-black">HDR</span>}
+      {hdr && <span className="absolute top-0.5 left-0.5 rounded-[3px] bg-gold/90 px-1 text-[8px] font-bold leading-tight text-black">HDR</span>}
     </div>
   );
 }
@@ -67,9 +67,7 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
   const selected = useApp((s) => s.selected === job.id);
   const select = useApp((s) => s.select);
   const act = useApp((s) => s.jobAction);
-  const canReorder = useApp((s) => s.has("batchReorder"));
-  const openPro = useApp((s) => s.openPro);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: job.id, disabled: !sortable || !canReorder });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: job.id, disabled: !sortable });
 
   const total = job.framesTotal ?? progress?.framesTotal ?? 0;
   const done = progress?.framesDone ?? job.framesDone;
@@ -91,15 +89,9 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
       onClick={() => select(job.id)}
     >
       {sortable && (
-        canReorder ? (
-          <button type="button" className="cursor-grab text-fg-subtle hover:text-fg" aria-label="Drag to reorder" {...attributes} {...listeners}>
-            <GripVertical className="size-3.5" />
-          </button>
-        ) : (
-          <button type="button" className="text-fg-subtle/60" aria-label="Reordering requires Pro" onClick={(e) => { e.stopPropagation(); openPro("batchReorder"); }}>
-            <GripVertical className="size-3.5" />
-          </button>
-        )
+        <button type="button" className="cursor-grab text-fg-subtle hover:text-fg" aria-label="Drag to reorder" {...attributes} {...listeners}>
+          <GripVertical className="size-3.5" />
+        </button>
       )}
       <Thumb path={job.spec.input} info={null} hdr={false} ready />
       <div className="min-w-0 flex-1">

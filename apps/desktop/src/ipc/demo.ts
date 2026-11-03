@@ -5,7 +5,6 @@
 import type {
   DeviceUuid,
   EcoMode,
-  Entitlements,
   GpuDevice,
   JobEvent,
   JobId,
@@ -14,7 +13,7 @@ import type {
   MediaInfo,
   Telemetry,
 } from "@framescale/ipc-types";
-import type { Backend, CmdError, LicenseInfo } from "./backend";
+import type { Backend, CmdError } from "./backend";
 
 const GiB = 1024 ** 3;
 
@@ -61,7 +60,6 @@ const devices: GpuDevice[] = [
   },
 ];
 
-const free: Entitlements = { tier: "free", features: [], licensee: null, expiresAt: null };
 
 function fakeInfo(path: string, i: number): MediaInfo {
   const hdr = i % 3 === 1;
@@ -109,7 +107,6 @@ type Sim = { summary: JobSummary; paused: boolean };
 
 export function createDemoBackend(): Backend {
   let selected: DeviceUuid | null = null;
-  let license: LicenseInfo = { entitlements: free, developmentKey: true };
   let eco: EcoMode = { mode: "off" };
   const jobs = new Map<JobId, Sim>();
   const jobSubs = new Set<(e: JobEvent) => void>();
@@ -157,8 +154,8 @@ export function createDemoBackend(): Backend {
     active = undefined;
   }, 500);
 
-  const fail = (code: string, message: string, feature: CmdError["feature"] = null): never => {
-    throw { code, message, feature } satisfies CmdError;
+  const fail = (code: string, message: string): never => {
+    throw { code, message } satisfies CmdError;
   };
 
   return {
@@ -179,10 +176,6 @@ export function createDemoBackend(): Backend {
       return paths.map((p, i) => ({ path: p, info: fakeInfo(p, i), error: null }));
     },
     async enqueueJobs(specs) {
-      const pending = [...jobs.values()].filter((s) => !["done", "failed", "cancelled"].includes(s.summary.state));
-      if (!license.entitlements.features.includes("batchUnlimited") && pending.length + specs.length > 3) {
-        fail("proRequired", "the free tier queues up to 3 videos at once", "batchUnlimited");
-      }
       return specs.map((spec, i) => {
         const id = crypto.randomUUID() as JobId;
         jobs.set(id, {
@@ -219,31 +212,10 @@ export function createDemoBackend(): Backend {
       jobs.delete(id);
     },
     async reorderJobs(order) {
-      if (!license.entitlements.features.includes("batchReorder")) {
-        fail("proRequired", "reordering the queue is a Pro feature", "batchReorder");
-      }
       order.forEach((id, i) => {
         const s = jobs.get(id);
         if (s) s.summary.queuePos = i;
       });
-    },
-    async getLicense() {
-      return license;
-    },
-    async activateLicense(token) {
-      if (!token.trim().toUpperCase().startsWith("DEMO-PRO")) {
-        fail("licenseInvalid", "license signature is invalid");
-      }
-      license = {
-        developmentKey: true,
-        entitlements: {
-          tier: "pro",
-          features: ["faceFix", "interpolateHighFactor", "proResOutput", "outputAbove4k", "batchReorder", "batchUnlimited", "multiGpu", "byom"],
-          licensee: "Demo User",
-          expiresAt: null,
-        },
-      };
-      return license;
     },
     async setEcoMode(mode) {
       eco = mode;

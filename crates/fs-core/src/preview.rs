@@ -26,7 +26,6 @@ pub struct PreviewTools {
     pub worker: PathBuf,
     pub models_dir: PathBuf,
     pub device: Option<GpuDevice>,
-    pub license_token: Option<String>,
 }
 
 fn count_jpegs(dir: &Path) -> u32 {
@@ -39,12 +38,14 @@ fn count_jpegs(dir: &Path) -> u32 {
         .unwrap_or(0)
 }
 
-/// Render a preview of `input` starting at `at_s` into `<root>/<id>/`.
-/// Returns the protocol prefix `preview/<id>` plus metadata.
+/// Render `seconds` (≤ [`PREVIEW_SECONDS`]; a single frame if tiny) of `input`
+/// starting at `at_s` into `<root>/<id>/`. Returns the protocol prefix
+/// `preview/<id>` plus metadata.
 pub async fn render(
     tools: &PreviewTools,
     input: &Path,
     at_s: f64,
+    seconds: f64,
     pipeline: &PipelineSpec,
     root: &Path,
 ) -> Result<PreviewResult, String> {
@@ -105,9 +106,11 @@ pub async fn render(
     .map_err(|e| e.to_string())?
     .plan;
 
-    let window = (PREVIEW_SECONDS * planned.decode.conform_rate.as_f64())
+    // `seconds` 0 → a single-frame still (shown first while the full clip renders).
+    let seconds = seconds.clamp(0.0, PREVIEW_SECONDS);
+    let window = (seconds * planned.decode.conform_rate.as_f64())
         .round()
-        .max(2.0) as u64;
+        .max(1.0) as u64;
     let start = planned
         .decode
         .conform_rate
@@ -136,7 +139,6 @@ pub async fn render(
             first_frame: start,
             expected_hash: None,
         },
-        license_token: tools.license_token.clone(),
         duty: 1.0,
         preview: Some(PreviewRequest {
             frames: window,

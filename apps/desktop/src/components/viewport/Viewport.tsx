@@ -106,10 +106,10 @@ export function Viewport() {
           fitSignal={fit}
           {...(zoomReq ? { zoomRequest: zoomReq } : {})}
         />
-        {current?.status === "rendering" && (
+        {(current?.status === "rendering" || current?.refining) && (
           <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">
             <span className="rounded-sm bg-black/70 px-3 py-1.5 text-xs text-fg backdrop-blur-sm ring-1 ring-border">
-              Rendering 2 s on the GPU…
+              {current.refining ? "First frame ready: rendering the full 2 s on the GPU…" : "Rendering the first frame…"}
             </span>
           </div>
         )}
@@ -122,9 +122,9 @@ export function Viewport() {
         cuts={[]}
         canRender={canRender}
         renderHint={renderHint}
-        rendering={current?.status === "rendering"}
+        rendering={current?.status === "rendering" || !!current?.refining}
         onRender={() => void renderPreview(t)}
-        playable={showingPreview}
+        playable={showingPreview && (r?.afterFrames ?? 0) > 1}
         playing={player.playing}
         onTogglePlay={() => player.setPlaying((p) => !p)}
         playhead={showingPreview && player.frames ? player.frame / player.frames : null}

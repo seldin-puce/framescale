@@ -47,7 +47,10 @@ pub fn serve(state: &Arc<AppState>, req: &Request<Vec<u8>>) -> Response<Vec<u8>>
     match resolve(state, req.uri().path()).map(std::fs::read) {
         Some(Ok(bytes)) => respond(StatusCode::OK, bytes),
         Some(Err(_)) => respond(StatusCode::NOT_FOUND, Vec::new()),
-        None => respond(StatusCode::FORBIDDEN, Vec::new()),
+        None => {
+            tracing::warn!(path = %req.uri().path(), "fs:// request outside the allowed roots");
+            respond(StatusCode::FORBIDDEN, Vec::new())
+        }
     }
 }
 

@@ -123,7 +123,6 @@ pub enum FailureKind {
     EncoderUnavailable,
     DecodeFailed,
     WorkerCrashed,
-    LicenseRequired,
     InvalidInput,
     Io,
     Internal,

@@ -75,7 +75,6 @@ impl RecoveryPolicy {
             Some(exit::OK) => return Action::Done,
             Some(exit::STOPPED) => return Action::Stopped,
             Some(exit::DISK_FULL) => return Action::PauseForDisk,
-            Some(exit::LICENSE) => return Action::Fail(msg),
             Some(exit::USAGE) => return Action::Fail(format!("worker protocol error: {msg}")),
             _ => {}
         }
@@ -86,7 +85,7 @@ impl RecoveryPolicy {
         }
         match kind {
             Some(FailureKind::DiskFull) => return Action::PauseForDisk,
-            Some(FailureKind::LicenseRequired | FailureKind::InvalidInput) => {
+            Some(FailureKind::InvalidInput) => {
                 return Action::Fail(msg);
             }
             Some(FailureKind::VramOom) => {
@@ -173,10 +172,11 @@ mod tests {
             )),
             Action::PauseForDisk
         );
+        // Unreadable / unsupported input is permanent: fail, never retry.
         assert!(matches!(
             p.decide(&ex(
-                Some(exit::LICENSE),
-                Some(FailureKind::LicenseRequired),
+                Some(exit::FATAL),
+                Some(FailureKind::InvalidInput),
                 0,
                 0
             )),

@@ -1,8 +1,10 @@
 # FrameScale AI
 
-A local, cross-platform desktop app for AI video upscaling, restoration, and
-frame interpolation. It runs on NVIDIA, AMD, Intel, and Apple Silicon GPUs.
-Built on Tauri v2 (Rust + React).
+A free, open-source desktop app for AI video upscaling, restoration, and frame
+interpolation. It runs on NVIDIA, AMD, Intel, and Apple Silicon GPUs, entirely on
+your own computer. Built on Tauri v2 (Rust + React).
+
+Every feature is free, with no accounts, watermarks, or limits.
 
 ```
 framescale/
@@ -29,7 +31,6 @@ framescale/
 │   ├── fs-hw                   Vulkan discovery, ranking, telemetry backends
 │   ├── fs-media                ffprobe, typed FFmpeg argv builders, progress/stderr parsing
 │   ├── fs-proc                 Job Objects / process groups / reaper
-│   ├── fs-license              Ed25519 entitlements (linked into host AND worker)
 │   ├── fs-journal              SQLite WAL journal (+ migrations/)
 │   ├── fs-core                 job runner: analyze → plan → supervised render → concat → mux; recovery policy
 │   ├── fs-engine               InferenceBackend, ncnn bridge (cpp/), tiler
@@ -48,3 +49,20 @@ framescale/
 ```
 
 Quick start: see [docs/build-and-release.md](docs/build-and-release.md).
+
+## License
+
+FrameScale AI is free software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE). You may use, study, share
+and modify it; distributed modifications must stay under the GPL.
+
+Bundled components keep their own licenses (FFmpeg LGPL, ncnn BSD-3-Clause,
+Real-ESRGAN BSD-3-Clause, RIFE MIT, …). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Models with non-commercial terms (e.g. CodeFormer) are never bundled. They're
+bring-your-own only.
+
+## Supporting the project
+
+FrameScale stays fully featured for everyone. If it saves you time, donations
+via GitHub Sponsors or Ko-fi fund GPU test hardware and new model support.
+They never unlock anything.

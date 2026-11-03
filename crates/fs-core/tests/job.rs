@@ -71,7 +71,6 @@ async fn full_job_with_hard_pause_and_resume() {
             vaapi_device: None,
         },
         device: None,
-        license_token: None,
         ledger: Arc::new(fs_proc::Ledger::new(dir.join("ledger.jsonl"))),
         duty: 1.0,
     });

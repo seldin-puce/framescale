@@ -1,6 +1,5 @@
 import type { StageKind } from "@framescale/ipc-types";
 import { COMING_SOON, MODELS, useApp, type StageState } from "@/stores/app";
-import { ProGate } from "../pro/ProGate";
 import { Segmented } from "../ui/Segmented";
 import { STAGE_META } from "./PipelineChain";
 
@@ -60,14 +59,8 @@ export function StageInspector() {
       {kind === "interpolate" && (
         <>
           <Field label="Frame-rate multiplier">
-            <div className="flex gap-1.5">
-              <Segmented ariaLabel="Interpolation factor" className="flex-1" value="2" onChange={() => set({ factor: 2 })}
-                options={[{ value: "2", label: "2×" }]} />
-              <ProGate feature="interpolateHighFactor" className="flex-[2]">
-                <Segmented ariaLabel="High interpolation factor" value={String(s.factor)} onChange={(v) => set({ factor: Number(v) as 3 | 4 })}
-                  options={[{ value: "3", label: "3×" }, { value: "4", label: "4×" }]} />
-              </ProGate>
-            </div>
+            <Segmented ariaLabel="Interpolation factor" value={String(s.factor)} onChange={(v) => set({ factor: Number(v) as 2 | 3 | 4 })}
+              options={[{ value: "2", label: "2×" }, { value: "3", label: "3×" }, { value: "4", label: "4×" }]} />
           </Field>
           <Field label={`Scene-cut sensitivity · ${s.sceneThreshold}`}>
             <input type="range" min={4} max={30} value={s.sceneThreshold} onChange={(e) => set({ sceneThreshold: Number(e.target.value) })}

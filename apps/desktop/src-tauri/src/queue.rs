@@ -38,7 +38,6 @@ pub async fn run(state: Arc<AppState>) {
             models_dir: state.paths.models.clone(),
             encoders: state.encoder_env(),
             device: state.selected_device(),
-            license_token: state.license_token.read().ok().and_then(|t| t.clone()),
             ledger: state.ledger.clone(),
             duty: state.telemetry.borrow().eco.duty.max(0.1),
         });

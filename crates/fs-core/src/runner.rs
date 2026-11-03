@@ -37,7 +37,6 @@ pub struct Services {
     pub models_dir: PathBuf,
     pub encoders: EncoderEnv,
     pub device: Option<GpuDevice>,
-    pub license_token: Option<String>,
     pub ledger: Arc<Ledger>,
     pub duty: f32,
 }
@@ -547,7 +546,6 @@ async fn run_worker_once(
         job: id,
         plan: plan.clone(),
         start: start.clone(),
-        license_token: ctx.svc.license_token.clone(),
         duty: ctx.svc.duty,
         preview: None,
     };

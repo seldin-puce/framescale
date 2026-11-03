@@ -87,6 +87,13 @@ fn main() -> Result<()> {
         Cmd::Pin => pin::run(),
         Cmd::Gate { ffmpeg, target } => gate::check(&m.ffmpeg.gate, &ffmpeg, &target.resolve()?),
         Cmd::GenTypes => {
+            // Start clean so types deleted on the Rust side disappear here too.
+            let gen_dir = util::root().join("packages/ipc-types/src/generated");
+            for e in std::fs::read_dir(&gen_dir)?.flatten() {
+                if e.path().extension().is_some_and(|x| x == "ts") {
+                    std::fs::remove_file(e.path())?;
+                }
+            }
             util::cargo(&["test", "--quiet", "-p", "fs-types", "export_bindings"])?;
             util::write_types_index()
         }

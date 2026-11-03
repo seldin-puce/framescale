@@ -1,4 +1,4 @@
-import { ChevronDown, Cpu, Leaf, Sparkles } from "lucide-react";
+import { ChevronDown, Cpu, Leaf, Heart } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/stores/app";
 import { useTelemetry } from "@/stores/telemetry";
@@ -10,9 +10,7 @@ const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform)
 export function TitleBar() {
   const hw = useApp((s) => s.hardware);
   const setDevice = useApp((s) => s.setDevice);
-  const tier = useApp((s) => s.entitlements.tier);
-  const devKey = useApp((s) => s.developmentKey);
-  const openPro = useApp((s) => s.openPro);
+  const openAbout = useApp((s) => s.setAboutOpen);
   const eco = useApp((s) => s.eco);
   const t = useTelemetry();
 
@@ -60,19 +58,15 @@ export function TitleBar() {
         </Tooltip>
       )}
 
-      {tier === "pro" ? (
-        <Tooltip label={devKey ? "Pro (development key build)" : "FrameScale Pro"}>
-          <span className="rounded-[4px] bg-pro px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-black">PRO</span>
-        </Tooltip>
-      ) : (
+      <Tooltip label="About FrameScale: free and open source">
         <button
           type="button"
-          onClick={() => openPro(null)}
-          className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs font-medium text-pro ring-1 ring-pro/35 transition-colors hover:bg-pro/10"
+          onClick={() => openAbout(true)}
+          className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs font-medium text-fg-muted ring-1 ring-border transition-colors hover:bg-white/6 hover:text-fg"
         >
-          <Sparkles className="size-3.5" /> Upgrade
+          <Heart className="size-3.5 text-[#db61a2]" /> Support
         </button>
-      )}
+      </Tooltip>
     </header>
   );
 }

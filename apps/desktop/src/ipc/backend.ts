@@ -1,8 +1,6 @@
 import type {
   DeviceUuid,
   EcoMode,
-  Entitlements,
-  Feature,
   GpuDevice,
   JobEvent,
   JobId,
@@ -29,16 +27,11 @@ export interface ProbeResult {
   error: string | null;
 }
 
-export interface LicenseInfo {
-  entitlements: Entitlements;
-  developmentKey: boolean;
-}
 
 /** Mirrors `commands::CmdError` in the Rust host. */
 export interface CmdError {
   code: string;
   message: string;
-  feature: Feature | null;
 }
 
 export function isCmdError(e: unknown): e is CmdError {
@@ -63,11 +56,9 @@ export interface Backend {
   cancelJob(id: JobId): Promise<void>;
   removeJob(id: JobId): Promise<void>;
   reorderJobs(order: JobId[]): Promise<void>;
-  getLicense(): Promise<LicenseInfo>;
-  activateLicense(token: string): Promise<LicenseInfo>;
   setEcoMode(mode: EcoMode): Promise<void>;
-  /** Render 2 s of `path` from `atS` through `pipeline` (real engine). */
-  renderPreview(path: string, atS: number, pipeline: PipelineSpec): Promise<PreviewResult>;
+  /** Render `seconds` (0 = one frame, max 2) of `path` from `atS` through `pipeline` (real engine). */
+  renderPreview(path: string, atS: number, seconds: number, pipeline: PipelineSpec): Promise<PreviewResult>;
   /** Cached JPEG thumbnail; resolves to an `fs://` path for `assetUrl`. */
   thumbnail(path: string): Promise<string>;
   /** URL for an `fs://` path (preview frames, thumbnails). */

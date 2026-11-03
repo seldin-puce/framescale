@@ -2,8 +2,7 @@ import type { StageKind } from "@framescale/ipc-types";
 import { Blend, ImageUpscale, Layers, ScanFace, Waves } from "lucide-react";
 import { Fragment } from "react";
 import { cn } from "@/lib/cn";
-import { COMING_SOON, STAGE_ORDER, stageFeature, useApp } from "@/stores/app";
-import { ProBadge } from "../ui/ProBadge";
+import { COMING_SOON, STAGE_ORDER, useApp } from "@/stores/app";
 import { Tooltip } from "../ui/Tooltip";
 
 export const STAGE_META: Record<StageKind, { label: string; icon: typeof Layers; hint: string }> = {
@@ -20,17 +19,13 @@ export function PipelineChain() {
   const selectedStage = useApp((s) => s.selectedStage);
   const selectStage = useApp((s) => s.selectStage);
   const setStage = useApp((s) => s.setStage);
-  const has = useApp((s) => s.has);
-  const openPro = useApp((s) => s.openPro);
 
   return (
     <ol className="flex flex-col" aria-label="Processing pipeline">
       {STAGE_ORDER.map((kind, i) => {
         const s = stages[kind];
         const meta = STAGE_META[kind];
-        const feature = kind === "faceFix" ? "faceFix" : null;
-        const locked = feature != null && !has(feature);
-        const soon = COMING_SOON.has(kind);
+                const soon = COMING_SOON.has(kind);
         const Icon = meta.icon;
         const detail =
           kind === "upscale" ? `×${s.scale}` : kind === "interpolate" ? `×${s.factor}` : kind === "denoise" ? `L${s.strength}` : "";
@@ -44,19 +39,19 @@ export function PipelineChain() {
                 className={cn(
                   "group flex items-center gap-2 rounded-sm px-1.5 py-1.5 ring-1 transition-colors",
                   selectedStage === kind ? "bg-accent/10 ring-accent/40" : "ring-transparent hover:bg-white/4",
-                  (locked || soon) && "opacity-60",
+                  soon && "opacity-60",
                 )}
               >
                 <button
                   type="button"
-                  onClick={() => (locked && !soon ? openPro("faceFix") : selectStage(kind))}
+                  onClick={() => selectStage(kind)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
                   aria-current={selectedStage === kind}
                 >
                   <span
                     className={cn(
                       "grid size-6 shrink-0 place-items-center rounded-[5px] ring-1",
-                      s.enabled && !locked ? "bg-accent/15 text-accent ring-accent/35" : "bg-black/25 text-fg-subtle ring-border",
+                      s.enabled ? "bg-accent/15 text-accent ring-accent/35" : "bg-black/25 text-fg-subtle ring-border",
                     )}
                   >
                     <Icon className="size-3.5" strokeWidth={1.75} />
@@ -73,10 +68,6 @@ export function PipelineChain() {
                       Soon
                     </span>
                   </Tooltip>
-                ) : locked ? (
-                  <button type="button" onClick={() => openPro("faceFix")} aria-label="Face Fix requires Pro">
-                    <ProBadge />
-                  </button>
                 ) : (
                   <button
                     type="button"
@@ -84,8 +75,6 @@ export function PipelineChain() {
                     aria-checked={s.enabled}
                     aria-label={`${meta.label} ${s.enabled ? "on" : "off"}`}
                     onClick={() => {
-                      const f = stageFeature(kind, s);
-                      if (!s.enabled && f && !has(f)) return openPro(f);
                       setStage(kind, { enabled: !s.enabled });
                       selectStage(kind);
                     }}

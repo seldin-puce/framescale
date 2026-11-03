@@ -1,8 +1,9 @@
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { ProActivationModal } from "../pro/ProActivationModal";
 import { InspectorSidebar } from "../inspector/InspectorSidebar";
 import { QueueSidebar } from "../queue/QueueSidebar";
 import { Viewport } from "../viewport/Viewport";
+import { AboutDialog } from "../support/AboutDialog";
+import { SupportNudge } from "../support/SupportNudge";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
@@ -36,7 +37,8 @@ export function AppShell() {
         </Panel>
       </Group>
       <StatusBar />
-      <ProActivationModal />
+      <AboutDialog />
+      <SupportNudge />
       <Toast />
     </div>
   );

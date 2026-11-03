@@ -18,7 +18,7 @@ default-members = ["apps/desktop/src-tauri", "crates/*"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-license = "LicenseRef-FrameScale-Proprietary"
+license = "GPL-3.0-or-later"
 publish = false
 authors = ["FrameScale AI"]
 
@@ -28,7 +28,6 @@ fs-types   = { path = "crates/fs-types" }
 fs-hw      = { path = "crates/fs-hw" }
 fs-media   = { path = "crates/fs-media" }
 fs-proc    = { path = "crates/fs-proc" }
-fs-license = { path = "crates/fs-license" }
 fs-journal = { path = "crates/fs-journal" }
 fs-engine  = { path = "crates/fs-engine" }
 fs-core    = { path = "crates/fs-core" }
@@ -71,16 +70,13 @@ cmake       = "0.1.58"
 rusqlite = { version = "0.41.1", features = ["bundled"] }  # static SQLite: no system lib differences
 fs4      = "1.1.0"
 
-# --- security -----------------------------------------------------------------
-ed25519-dalek = "3.0.0"
-base64        = "0.23.1"
-sha2          = "0.11.1"
 
 # --- process / OS -------------------------------------------------------------
 nix         = { version = "0.31.3", features = ["signal", "process", "fs"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 
 # --- xtask only ---------------------------------------------------------------
+sha2    = "0.11.1"   # SHA-256 verification of pinned downloads
 clap    = { version = "4.6.7", features = ["derive"] }
 toml    = "1.1.8"
 zip     = { version = "9.2.2", default-features = false, features = ["deflate"] }

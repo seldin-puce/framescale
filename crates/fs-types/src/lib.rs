@@ -8,7 +8,6 @@
 
 pub mod device;
 pub mod job;
-pub mod license;
 pub mod media;
 pub mod pipeline;
 pub mod preview;
@@ -19,7 +18,6 @@ pub use device::{DeviceKind, DeviceUuid, GpuDevice, Vendor};
 pub use job::{
     FailureKind, JobEvent, JobId, JobProgress, JobState, JobSummary, PauseMode, WarningCode,
 };
-pub use license::{Entitlements, Feature, Tier};
 pub use media::{
     AnalysisReport, ColorPrimaries, ColorProfile, ColorRange, ContentLightLevel, FieldOrder,
     MasteringDisplay, MatrixCoefficients, MediaInfo, Rational, TransferCharacteristic, VideoStream,

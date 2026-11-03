@@ -146,7 +146,11 @@ pub fn all_candidates(os: Os, vendor: Option<Vendor>) -> Vec<&'static str> {
 }
 
 /// Run a tiny test encode for each candidate in parallel and keep the ones that work.
-pub fn probe_usable(ffmpeg: &Path, candidates: &[&str]) -> BTreeSet<String> {
+pub fn probe_usable(
+    ffmpeg: &Path,
+    candidates: &[&str],
+    vaapi_device: Option<&str>,
+) -> BTreeSet<String> {
     std::thread::scope(|scope| {
         let handles: Vec<_> = candidates
             .iter()
@@ -157,7 +161,7 @@ pub fn probe_usable(ffmpeg: &Path, candidates: &[&str]) -> BTreeSet<String> {
                     } else {
                         "nv12"
                     };
-                    let a = argv::encoder_probe(enc, pix);
+                    let a = argv::encoder_probe(enc, pix, vaapi_device);
                     let ok = Command::new(ffmpeg)
                         .args(a.as_slice())
                         .stdout(Stdio::null())
