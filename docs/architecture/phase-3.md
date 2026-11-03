@@ -88,7 +88,15 @@ than the 9070 XT, which the default ranking correctly avoids.
   fidelity slider is real. Measured: about 240 ms per face on RX 9070 XT,
   2.2 s per face on CPU. Faces aren't tracked across frames (no temporal
   smoothing yet).
-- Windows CPU path is single-threaded (MSVC OpenMP needs vcomp140.dll).
+- Windows CPU path (done): MSVC builds have no OpenMP (vcomp140.dll would need
+  the dynamic CRT), so ncnn runs each call single-threaded and the backend
+  runs one tile per core (`cores/2`, at most 8; about 8 tiles per worker).
+  Measured on a 24-thread Arrow Lake at 640×360: AnimeVideo-v3 ×2 1376 → 532
+  ms/frame, Real-CUGAN 2755 → 1263 ms (2.6× / 2.2×; ncnn's OpenMP on Linux:
+  482 / 962 ms). RIFE and Face Fix stay single-threaded there (whole-frame and
+  per-face networks); the GPU is the intended path anyway. Linux/macOS keep
+  ncnn's built-in simpleomp. Force the tile mode anywhere with
+  `FS_CPU_TILE_WORKERS=n` (benchmarks).
 - SR pre/post-processing runs on the CPU (u8/u16 ⇄ f32); GPU shaders for it are an
   optimisation for later.
 - Measured on AMD RDNA4 only; NVIDIA/Apple may prefer other tile sizes. A

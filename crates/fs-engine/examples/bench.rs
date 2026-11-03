@@ -168,5 +168,51 @@ fn main() {
             );
         }
     }
+    // CPU path (`FS_BENCH_CPU=1`): ncnn's own threads vs one tile per core
+    // (`FS_CPU_TILE_WORKERS`, the Windows/MSVC mode).
+    if std::env::var_os("FS_BENCH_CPU").is_some() {
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get() as i32);
+        println!("\n== CPU ({threads} threads available)");
+        let cpu = DeviceSel {
+            index: -1,
+            name: "CPU".into(),
+            vram_bytes: None,
+        };
+        for (label, stage) in [
+            (
+                "AnimeVideo-v3 ×2   640×360",
+                StageConfig::Upscale {
+                    model: m("realesr-animevideov3"),
+                    scale: 2,
+                },
+            ),
+            (
+                "Real-CUGAN SE denoise 640×360",
+                StageConfig::Denoise {
+                    model: m("realcugan-se"),
+                    strength: 2,
+                },
+            ),
+        ] {
+            let mut b =
+                NcnnBackend::new(&plan(stage, &models), cpu.clone(), threads).expect("cpu load");
+            let a = frame(640, 360, 0);
+            let tile = std::env::var("FS_TILE")
+                .ok()
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(b.max_tile());
+            b.process(&a, tile).expect("warm-up");
+            let t0 = Instant::now();
+            for _ in 0..2 {
+                b.process(&a, tile).expect("run");
+            }
+            let per = t0.elapsed().as_secs_f64() / 2.0;
+            println!(
+                "  {label}: {:>7.1} ms/frame  {:>6.2} fps",
+                per * 1e3,
+                1.0 / per
+            );
+        }
+    }
     ncnn::shutdown();
 }

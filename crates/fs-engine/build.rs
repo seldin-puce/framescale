@@ -5,6 +5,9 @@
 //! the source build during local iteration.
 
 fn main() {
+    // `ncnn_omp`: ncnn runs layers multi-threaded itself (OpenMP). Without it
+    // (MSVC), the backend parallelises CPU work across tiles instead.
+    println!("cargo::rustc-check-cfg=cfg(ncnn_omp)");
     #[cfg(feature = "ncnn")]
     ncnn::build();
 }
@@ -20,6 +23,11 @@ mod ncnn {
         println!("cargo:rerun-if-env-changed=NCNN_SRC");
         println!("cargo:rerun-if-env-changed=NCNN_DIR");
 
+        if !msvc() {
+            // Source builds enable ncnn's simpleomp there; prebuilt NCNN_DIR
+            // installs are assumed to match.
+            println!("cargo:rustc-cfg=ncnn_omp");
+        }
         let prefix = match std::env::var_os("NCNN_DIR") {
             Some(dir) => PathBuf::from(dir),
             None => build_from_source(),
@@ -133,8 +141,9 @@ mod ncnn {
         }
         if msvc() {
             // Match Rust's +crt-static (.cargo/config.toml). MSVC's OpenMP needs
-            // vcomp140.dll, which a static-CRT app doesn't ship, so CPU-path
-            // threading is off on Windows (GPUs carry the load there anyway).
+            // vcomp140.dll (plus the dynamic CRT), which a static-CRT app doesn't
+            // ship. ncnn stays single-threaded per call; the backend runs one
+            // tile per core instead (see `ncnn_omp`).
             cfg.define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
             off(&mut cfg, "NCNN_OPENMP");
         } else {

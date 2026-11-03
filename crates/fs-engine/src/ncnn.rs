@@ -143,20 +143,25 @@ struct Sr {
 /// input w + 36 → output 2w), from the reference implementation.
 const CUGAN_PAD: usize = 18;
 /// The SE statistics pass runs on the whole frame, downscaled to about this
-/// many pixels ("very rough" sync in realcugan-ncnn-vulkan, its default).
-const CUGAN_STATS_AREA: f64 = 512.0 * 512.0;
+/// many pixels ("very rough" sync, realcugan-ncnn-vulkan's default). Measured
+/// on a 1920×1028 photo against exact full-resolution statistics: mean Δ 2.8
+/// levels at 512², 3.1 at 256². The CPU path uses 256²: the pass is serial
+/// there and dominated the frame time.
+const CUGAN_STATS_AREA_GPU: f64 = 512.0 * 512.0;
+const CUGAN_STATS_AREA_CPU: f64 = 256.0 * 256.0;
 
 /// Denoise stage: Real-CUGAN ×2 at the chosen denoise level, then an exact
 /// area downscale back to the input size. (The ncnn Pro models take and give
 /// plain 0–1 RGB like SE; measured, no extra normalization.)
 struct Cugan {
     model: UniquePtr<ffi::Model>,
+    stats_area: f64,
 }
 
 impl Cugan {
     /// SE statistics of the whole frame (from a downscaled copy).
     fn stats(&self, img: &Planar) -> Result<(Vec<f32>, Vec<i32>), EngineError> {
-        let f = ((img.w * img.h) as f64 / CUGAN_STATS_AREA).sqrt().max(1.0);
+        let f = ((img.w * img.h) as f64 / self.stats_area).sqrt().max(1.0);
         let even = |v: f64| ((v / 2.0).round() as usize).max(1) * 2;
         let (sw, sh) = (
             even(img.w as f64 / f).min(img.w + img.w % 2),
@@ -352,6 +357,9 @@ pub struct NcnnBackend {
     face: Option<FaceFix>,
     /// Faces restored in the last processed frame.
     faces: usize,
+    /// Tiles in flight on the CPU path: 1 when ncnn threads each layer itself
+    /// (OpenMP), one per core when it can't (Windows/MSVC builds).
+    cpu_workers: usize,
     /// Reused Real-CUGAN ×2 buffer.
     dn_scratch: Planar,
     sr: Option<Sr>,
@@ -455,6 +463,20 @@ fn load(
 impl NcnnBackend {
     pub fn new(plan: &EnginePlan, device: DeviceSel, threads: i32) -> Result<Self, EngineError> {
         let models = Path::new(&plan.models_dir);
+        // CPU without ncnn-internal threading: single-threaded models, one tile
+        // per core. FS_CPU_TILE_WORKERS forces it (benchmarks, any platform).
+        let forced = std::env::var("FS_CPU_TILE_WORKERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok());
+        let tile_parallel = device.index < 0 && (forced.is_some() || !cfg!(ncnn_omp));
+        // Measured (24-thread Arrow Lake): 8 workers beat 16 and 24; convolution
+        // is memory-bound and slow cores hold back the frame.
+        let cpu_workers = match forced {
+            Some(n) if tile_parallel => n.max(1),
+            _ if tile_parallel => (usize::try_from(threads).unwrap_or(1) / 2).clamp(1, 8),
+            _ => 1,
+        };
+        let threads = if tile_parallel { 1 } else { threads };
         let mut sr = None;
         let mut denoise = None;
         let mut face_fix = None;
@@ -472,6 +494,11 @@ impl NcnnBackend {
                     let (param, bin) = resolve_cugan(models, &model.id, *strength)?;
                     denoise = Some(Cugan {
                         model: load(&device, threads, &param, &bin)?,
+                        stats_area: if device.index >= 0 {
+                            CUGAN_STATS_AREA_GPU
+                        } else {
+                            CUGAN_STATS_AREA_CPU
+                        },
                     });
                 }
                 StageConfig::FaceFix { model, fidelity } => {
@@ -536,6 +563,7 @@ impl NcnnBackend {
             denoise,
             face: face_fix,
             faces: 0,
+            cpu_workers,
             dn_scratch: Planar::zeros(1, 1),
             sr,
             scratch: Planar::zeros(1, 1),
@@ -573,7 +601,17 @@ impl InferenceBackend for NcnnBackend {
         }
         // Two in-flight tiles keep the GPU busy while the CPU slices/stitches;
         // the output buffer is reused across frames (no 100 MB page-faulting).
-        let workers = if self.gpu { 2 } else { 1 };
+        let workers = if self.gpu { 2 } else { self.cpu_workers };
+        // Tile-parallel CPU: about eight tiles per worker so slow cores don't
+        // leave the rest idle at the end of a frame (measured: 640×360 at 8
+        // workers, 64 px tiles 532 ms vs 80 px 641 ms).
+        let tile = if workers > 2 {
+            let balanced =
+                ((input.width * input.height) as f64 / (workers * 8) as f64).sqrt() as u32;
+            tile.min((balanced / 16 * 16).max(64))
+        } else {
+            tile
+        };
         let mut img = planar::from_frame(input);
         if let Some(dn) = self.denoise.as_ref() {
             img = dn.denoise(&img, tile, workers, &mut self.dn_scratch)?;
