@@ -248,7 +248,7 @@ Windows 10 the installer fetches it.
 **2. Get the code and its dependencies**
 
 ```sh
-git clone <repository URL> framescale
+git clone https://github.com/seldin-puce/framescale.git framescale
 cd framescale
 pnpm install
 cargo xtask setup

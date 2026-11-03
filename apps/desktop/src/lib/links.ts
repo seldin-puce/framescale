@@ -5,7 +5,7 @@
  */
 export const LINKS = {
   /** Source repository, e.g. "https://github.com/<you>/framescale". */
-  repository: "",
+  repository: "https://github.com/seldin-puce/framescale",
   /** GitHub Sponsors page, e.g. "https://github.com/sponsors/<you>". */
   sponsors: "",
   /** Ko-fi page, e.g. "https://ko-fi.com/<you>". */
