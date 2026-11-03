@@ -12,12 +12,14 @@ on your own GPU.**
 ![GPUs](https://img.shields.io/badge/GPU-NVIDIA%20%7C%20AMD%20%7C%20Intel%20%7C%20Apple-success)
 ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-orange)
 ![Status](https://img.shields.io/badge/status-pre--release-yellow)
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/A4P429YUDG)
 
 [Features](#features) ·
 [Models](#models) ·
 [Performance](#performance) ·
 [Building from source](#building-from-source) ·
 [Architecture](#architecture) ·
+[Support](#support-the-project) ·
 [License](#license)
 
 </div>
@@ -236,6 +238,15 @@ request, please make sure `cargo fmt`, `cargo clippy -D warnings`,
 artifacts (models, binaries) must be pinned in
 [`third_party/manifest.toml`](third_party/manifest.toml) with their license
 and listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## Support the project
+
+FrameScale AI is free and stays fully featured for everyone. If it saves you
+time, you can buy me a coffee. Tips help pay for GPU test hardware (NVIDIA,
+AMD, Intel, Apple) and new model support. Donations are optional and never
+unlock anything.
+
+<a href="https://ko-fi.com/A4P429YUDG" target="_blank"><img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt="Buy Me a Coffee at ko-fi.com"></a>
 
 ## License
 
