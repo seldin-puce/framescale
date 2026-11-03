@@ -58,7 +58,7 @@ endian = 'little'
 EOF
   CROSS_FILE=(--cross-file "$WORK/cross.ini")
 fi
-meson setup "$WORK/dav1d/build" "$WORK/dav1d" "${CROSS_FILE[@]}" \
+meson setup "$WORK/dav1d/build" "$WORK/dav1d" ${CROSS_FILE[@]+"${CROSS_FILE[@]}"} \
   --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=static \
   -Denable_tools=false -Denable_tests=false
 ninja -C "$WORK/dav1d/build" && ninja -C "$WORK/dav1d/build" install
@@ -83,7 +83,7 @@ unpack ffmpeg ffmpeg.tar.xz
 CROSS_ARGS=()
 [[ $CROSS == 1 ]] && CROSS_ARGS=(--enable-cross-compile --arch="$ARCH" --target-os=darwin)
 ( cd "$WORK/ffmpeg" && ./configure \
-    --prefix="$OUT" "${CROSS_ARGS[@]}" \
+    --prefix="$OUT" ${CROSS_ARGS[@]+"${CROSS_ARGS[@]}"} \
     --cc="clang -arch $ARCH" --cxx="clang++ -arch $ARCH" \
     --extra-cflags="-I$PREFIX/include $CFLAGS" --extra-ldflags="-L$PREFIX/lib $LDFLAGS" \
     --pkg-config-flags=--static \
