@@ -2,14 +2,14 @@
 
 BA = """<figure class="ba-wrap" style="margin:28px 0 8px">
   <div class="ba" id="ba">
-    <img src="/img/after.jpg" alt="Video frame after FrameScale AI: sharper, cleaner, restored faces" width="1280" height="536" loading="lazy">
-    <img class="before" src="/img/before.jpg" alt="Low-resolution, noisy video frame before enhancement" width="1280" height="536" loading="lazy">
+    <img src="/img/after.jpg" alt="The same frame upscaled by FrameScale AI: sharper edges, texture and faces" width="1280" height="536" loading="lazy">
+    <img class="before" src="/img/before.jpg" alt="Low-resolution video frame enlarged with normal scaling" width="1280" height="536" loading="lazy">
     <span class="lbl l">Before</span><span class="lbl r">After · FrameScale</span>
     <div class="line"></div>
     <input type="range" min="0" max="100" value="50" aria-label="Drag to compare before and after">
     <div class="knob" aria-hidden="true">⇆</div>
   </div>
-  <figcaption class="ba-cap">320-pixel-wide noisy source (left) vs FrameScale AI with NAFNet denoise, Real-ESRGAN General v3 ×4 and Face Fix (right). Footage: <a href="https://mango.blender.org/">Tears of Steel</a> © Blender Foundation, CC BY 3.0.</figcaption>
+  <figcaption class="ba-cap">640-pixel-wide frame enlarged 2× normally (left) vs FrameScale AI with Real-ESRGAN General v3 (noise removal 20%) and Face Fix (right). Footage: <a href="https://mango.blender.org/">Tears of Steel</a> © Blender Foundation, CC BY 3.0.</figcaption>
 </figure>
 <script>(function(){var b=document.getElementById("ba");if(!b)return;var r=b.querySelector("input");var s=function(){b.style.setProperty("--pos",r.value+"%")};r.addEventListener("input",s);s();})();</script>
 """

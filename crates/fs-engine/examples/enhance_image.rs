@@ -1,7 +1,7 @@
 //! Run the real engine on one image (raw RGB24), e.g. for website before/after
 //! pictures:
 //!
-//!   enhance_image <in.rgb> <width> <height> <out.rgb> [--denoise ID LEVEL] [--upscale ID SCALE] [--facefix FIDELITY]
+//!   enhance_image <in.rgb> <width> <height> <out.rgb> [--denoise ID LEVEL] [--upscale ID SCALE] [--noise 0-1] [--facefix FIDELITY]
 //!
 //! Uses the first Vulkan GPU, or the CPU. Models come from `FS_MODELS` or the
 //! bundled resources folder.
@@ -17,7 +17,7 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     if a.len() < 5 {
         eprintln!(
-            "usage: enhance_image <in.rgb> <w> <h> <out.rgb> [--denoise ID LEVEL] [--upscale ID SCALE] [--facefix FIDELITY]"
+            "usage: enhance_image <in.rgb> <w> <h> <out.rgb> [--denoise ID LEVEL] [--upscale ID SCALE] [--noise 0-1] [--facefix FIDELITY]"
         );
         std::process::exit(2);
     }
@@ -39,6 +39,15 @@ fn main() {
                 scale: a[i + 2].parse().expect("scale"),
                 denoise: None,
             }),
+            "--noise" => {
+                // Noise removal (0–1) for the last Upscale stage (General v3).
+                let v: f32 = a[i + 1].parse().expect("noise");
+                if let Some(StageConfig::Upscale { denoise, .. }) = stages.last_mut() {
+                    *denoise = Some(v);
+                }
+                i += 2;
+                continue;
+            }
             "--facefix" => {
                 stages.push(StageConfig::FaceFix {
                     model: model("codeformer"),
