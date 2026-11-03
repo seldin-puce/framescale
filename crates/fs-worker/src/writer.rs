@@ -85,6 +85,9 @@ pub fn spawn(
                         if let Some((_, old)) = cur.take() {
                             old.kill(); // protocol violation: frames for a new segment without Close
                         }
+                        // A crashed or killed earlier attempt can leave a `.part` behind.
+                        // It's never committed data, so discard it before re-encoding.
+                        let _ = std::fs::remove_file(part_path(segment));
                         let argv = fs_media::argv::encode_segment(
                             &plan.encode,
                             frame.width,

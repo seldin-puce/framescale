@@ -225,7 +225,12 @@ async fn run_inner(ctx: &mut Ctx<'_>) -> Result<JobState, String> {
     std::fs::create_dir_all(&seg_dir).map_err(|e| e.to_string())?;
 
     // --- 1. probe + analyze + plan (a stored plan means we're resuming) -----------
-    let mut plan = match ctx.journal(|j| j.plan(id))? {
+    // A stored plan is reused only once segments exist (they must all come
+    // from the same plan to concatenate). Before that, re-plan: a retry then
+    // picks up app updates and the current hardware/encoders.
+    let committed = ctx.journal(|j| j.segments(id))?.len();
+    let stored = ctx.journal(|j| j.plan(id))?.filter(|_| committed > 0);
+    let mut plan = match stored {
         Some(p) => p,
         None => {
             ctx.state(JobState::Analyzing, None);

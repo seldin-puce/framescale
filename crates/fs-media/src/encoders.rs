@@ -230,6 +230,18 @@ pub fn select(
     Ok(build(encoder, codec, color, target, env, fell_back))
 }
 
+/// Arguments a specific encoder would get, bypassing availability checks.
+/// For tests and diagnostics (e.g. validating options against `ffmpeg -h encoder=`).
+pub fn encoder_args(
+    enc: &str,
+    codec: VideoCodec,
+    color: &ColorProfile,
+    target: EncodeTarget,
+    env: &EncoderEnv,
+) -> EncoderSelection {
+    build(enc, codec, color, target, env, false)
+}
+
 fn build(
     enc: &str,
     codec: VideoCodec,
@@ -259,13 +271,14 @@ fn build(
 
     match enc {
         e if e.ends_with("_nvenc") => {
+            // Hyphenated AQ options: av1_nvenc rejects the legacy `_aq` aliases.
             args = s(&[
                 "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", &qs, "-b:v", "0",
             ]);
             args.extend(s(&[
-                "-spatial_aq",
+                "-spatial-aq",
                 "1",
-                "-temporal_aq",
+                "-temporal-aq",
                 "1",
                 "-g",
                 &gop,
@@ -291,7 +304,16 @@ fn build(
             }
         }
         e if e.ends_with("_vaapi") => {
-            args = s(&["-rc_mode", "CQP", "-qp", &qs, "-g", &gop]);
+            // h264/hevc_vaapi take `-qp` (H.26x QP). av1_vaapi has no `-qp` and
+            // reads `-global_quality` as the AV1 qindex (0–255). Same scale as
+            // our SVT-AV1 mapping (CRF ≈ q + 8, qindex ≈ 4 × CRF). Verified on
+            // RX 9070 XT: qindex 40 → 710 KB, 200 → 33 KB for the same clip.
+            args = if e == "av1_vaapi" {
+                let qindex = ((u32::from(q) + 8) * 4).clamp(1, 255).to_string();
+                s(&["-rc_mode", "CQP", "-global_quality", &qindex, "-g", &gop])
+            } else {
+                s(&["-rc_mode", "CQP", "-qp", &qs, "-g", &gop])
+            };
             if e == "hevc_vaapi" && ten_bit {
                 args.extend(s(&["-profile:v", "main10"]));
             }

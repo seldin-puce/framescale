@@ -391,3 +391,151 @@ fn hdr10_static_metadata_survives_x265_bitstream() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// `name -> named constants` from an FFmpeg `-h` options listing.
+fn parse_options(help: &str) -> std::collections::HashMap<String, Vec<String>> {
+    let mut map = std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    for line in help.lines() {
+        if let Some(rest) = line.strip_prefix("  -") {
+            let name = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            map.entry(name.clone()).or_insert_with(Vec::new);
+            current = Some(name);
+        } else if line.starts_with("     ") && !line.trim().is_empty() {
+            if let (Some(c), Some(tok)) = (&current, line.split_whitespace().next()) {
+                map.get_mut(c).expect("current").push(tok.to_owned());
+            }
+        } else if !line.starts_with(' ') {
+            current = None;
+        }
+    }
+    map
+}
+
+/// Every `-option value` we pass to every encoder must exist in this FFmpeg
+/// build (private encoder option or global codec option), and named values
+/// must be valid constants. This catches a wrong option name without needing
+/// the GPU (e.g. `-qp` on av1_vaapi, which only reads `-global_quality`).
+#[test]
+fn every_encoder_option_we_emit_exists_in_ffmpeg() {
+    use fs_media::encoders::{self, EncodeTarget, EncoderEnv, Os};
+    use fs_types::pipeline::VideoCodec;
+
+    let Some((ff, _)) = tools() else {
+        return eprintln!("skip: FS_FFMPEG/FS_FFPROBE unset");
+    };
+    let help = |args: &[&str]| {
+        let o = Command::new(&ff)
+            .arg("-hide_banner")
+            .args(args)
+            .output()
+            .expect("ffmpeg -h");
+        String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr)
+    };
+    let full = help(&["-h", "full"]);
+    let start = full
+        .find("AVCodecContext AVOptions:")
+        .expect("global codec options");
+    let global =
+        parse_options(&full[start..full[start..].find("\n\n").map_or(full.len(), |e| start + e)]);
+
+    let mut hdr = probe::parse_streams(
+        r#"{"streams":[{"index":0,"codec_type":"video","width":3840,"height":2160,"pix_fmt":"yuv420p10le",
+            "color_primaries":"bt2020","color_transfer":"smpte2084","color_space":"bt2020nc","color_range":"tv"}],"format":{}}"#,
+        "x",
+    )
+    .expect("parse")
+    .video
+    .color;
+    hdr.mastering = Some(fs_types::media::MasteringDisplay {
+        red: [34000, 16000],
+        green: [13250, 34500],
+        blue: [7500, 3000],
+        white: [15635, 16450],
+        max_luminance: 10_000_000,
+        min_luminance: 50,
+    });
+    let target = EncodeTarget {
+        quality: 20,
+        width: 3840,
+        height: 2160,
+        rate: Rational::new(24, 1),
+    };
+    let env = EncoderEnv {
+        os: Os::Linux,
+        vendor: None,
+        usable: Default::default(),
+        vaapi_device: None,
+    };
+
+    let cases = [
+        ("hevc_nvenc", VideoCodec::Hevc10),
+        ("av1_nvenc", VideoCodec::Av1),
+        ("h264_nvenc", VideoCodec::H264),
+        ("hevc_amf", VideoCodec::Hevc10),
+        ("av1_amf", VideoCodec::Av1),
+        ("h264_amf", VideoCodec::H264),
+        ("hevc_qsv", VideoCodec::Hevc10),
+        ("av1_qsv", VideoCodec::Av1),
+        ("h264_qsv", VideoCodec::H264),
+        ("hevc_vaapi", VideoCodec::Hevc10),
+        ("av1_vaapi", VideoCodec::Av1),
+        ("h264_vaapi", VideoCodec::H264),
+        ("hevc_videotoolbox", VideoCodec::Hevc10),
+        ("prores_videotoolbox", VideoCodec::ProRes422Hq),
+        ("libsvtav1", VideoCodec::Av1),
+        ("libx265", VideoCodec::Hevc10),
+        ("libx264", VideoCodec::H264),
+        ("libkvazaar", VideoCodec::Hevc10),
+        ("libopenh264", VideoCodec::H264),
+    ];
+    let mut problems = Vec::new();
+    let mut checked = 0;
+    for (enc, codec) in cases {
+        let h = help(&["-h", &format!("encoder={enc}")]);
+        if h.contains("is not recognized") || !h.contains("Encoder ") {
+            eprintln!("skip {enc}: not in this build");
+            continue;
+        }
+        let private = parse_options(&h);
+        let color = if codec == VideoCodec::H264 {
+            probe::parse_streams(r#"{"streams":[{"index":0,"codec_type":"video","width":1920,"height":1080,"pix_fmt":"yuv420p"}],"format":{}}"#, "x").expect("p").video.color
+        } else {
+            hdr.clone()
+        };
+        let sel = encoders::encoder_args(enc, codec, &color, target, &env);
+        let a = &sel.args;
+        let mut i = 0;
+        while i < a.len() {
+            if let Some(flag) = a[i].strip_prefix('-') {
+                let name = flag.split(':').next().unwrap_or(flag);
+                let value = a.get(i + 1).map(String::as_str).unwrap_or("");
+                match private.get(name).or_else(|| global.get(name)) {
+                    None => problems.push(format!("{enc}: unknown option -{name}")),
+                    Some(consts)
+                        if !consts.is_empty()
+                            && value.parse::<f64>().is_err()
+                            && !consts.iter().any(|c| c == value) =>
+                    {
+                        problems.push(format!("{enc}: -{name} {value} is not one of {consts:?}"))
+                    }
+                    _ => {}
+                }
+                checked += 1;
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    eprintln!("checked {checked} encoder options");
+    assert!(
+        problems.is_empty(),
+        "invalid encoder options:\n  {}",
+        problems.join("\n  ")
+    );
+}

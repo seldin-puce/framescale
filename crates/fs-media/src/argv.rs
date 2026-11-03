@@ -64,10 +64,19 @@ impl fmt::Display for Argv {
     }
 }
 
-/// Common prefix: no stdin, no banner, warnings only, and no human stats line.
+/// Common prefix: no stdin, no banner, warnings only, no human stats line,
+/// and `-y`. Every file we write is our own temp/segment/`.part` file, and a
+/// leftover from a crashed run must never block the retry ("already exists").
 fn base(level: &str) -> Argv {
     let mut a = Argv::new();
-    a.args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", level]);
+    a.args([
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-y",
+        "-loglevel",
+        level,
+    ]);
     a
 }
 
@@ -231,10 +240,8 @@ pub fn thumbnail(
         color::to_rgb_filter(color, hp),
         color::display_jpeg_filter(color)
     );
-    a.args([
-        "-vf", &vf, "-c:v", "mjpeg", "-q:v", "4", "-update", "1", "-y",
-    ])
-    .arg(out);
+    a.args(["-vf", &vf, "-c:v", "mjpeg", "-q:v", "4", "-update", "1"])
+        .arg(out);
     a
 }
 

@@ -57,6 +57,7 @@ pub fn plan(
         "-hide_banner",
         "-nostdin",
         "-nostats",
+        "-y", // the output is our own `.part`; a crashed attempt may have left one
         "-loglevel",
         "warning",
         "-progress",

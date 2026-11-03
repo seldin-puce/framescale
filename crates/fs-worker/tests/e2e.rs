@@ -262,6 +262,10 @@ fn full_run_cut_holds_and_bit_exact_resume() {
     // --- 1. uninterrupted run -------------------------------------------------------
     let seg_a = dir.join("a");
     let (plan_a, info) = make_plan(&t, &src, &seg_a);
+    // Regression: a `.part` left by a killed earlier attempt must not block the
+    // render (FFmpeg used to refuse with "already exists").
+    std::fs::create_dir_all(&seg_a).expect("seg dir");
+    std::fs::write(seg_a.join("seg_00000.mkv.part"), b"stale partial segment").expect("stale");
     assert_eq!(plan_a.segment_frames, 96);
     let a = run_worker(
         &plan_a,
