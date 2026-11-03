@@ -323,31 +323,36 @@
           <h3>Windows</h3>
           <p>Windows 10 and 11, 64-bit. Installs per user, no admin rights.</p>
           <div class="files">
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">Installer <small>…_x64-setup.exe</small></a>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset="_x64-setup.exe">Download installer <small>.exe</small></a>
           </div>
         </div>
         <div class="card">
           <h3>macOS</h3>
-          <p>macOS 12 or later. Drag to Applications.</p>
+          <p>macOS 12 or later. Easiest: open <b>Terminal</b> (press <kbd>⌘</kbd> <kbd>Space</kbd>, type “Terminal”), paste this line and press <kbd>Return</kbd>. It installs the right version for your Mac and opens it.</p>
+          <div class="cmd">
+            <code id="mac-cmd">curl -fsSL https://framescale.org/install.sh | bash</code>
+            <button type="button" class="copy" data-copy="mac-cmd" aria-label="Copy the install command">Copy</button>
+          </div>
           <div class="files">
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">Apple Silicon <small>…_aarch64.dmg</small></a>
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">Intel <small>…_x64.dmg</small></a>
+            <span class="or">or download the app yourself</span>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset="_aarch64.dmg">Apple Silicon <small>M1 – M4</small></a>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset="_x64.dmg">Intel Mac <small>.dmg</small></a>
           </div>
         </div>
         <div class="card">
           <h3>Linux</h3>
           <p>64-bit, with a Vulkan driver (Mesa or NVIDIA).</p>
           <div class="files">
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">AppImage <small>any distro</small></a>
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">.deb <small>Debian / Ubuntu</small></a>
-            <a href="https://github.com/seldin-puce/framescale/releases/latest">.rpm <small>Fedora / openSUSE</small></a>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset="_amd64.AppImage">AppImage <small>any distro</small></a>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset="_amd64.deb">.deb <small>Debian / Ubuntu</small></a>
+            <a href="https://github.com/seldin-puce/framescale/releases/latest" data-asset=".x86_64.rpm">.rpm <small>Fedora / openSUSE</small></a>
           </div>
         </div>
       </div>
 
       <div class="two" style="margin-top:28px">
         <div class="callout">
-          <b>First run.</b> FrameScale isn't code-signed yet. On Windows, if SmartScreen appears, choose <i>More info → Run anyway</i>. On macOS, the easiest install is one line in Terminal: <code>curl -fsSL https://framescale.org/install.sh | bash</code>. Or open the .dmg, then <i>System Settings → Privacy &amp; Security → Open Anyway</i>. Details are in the <a href="https://github.com/seldin-puce/framescale#download">README</a> and the <a href="/code-signing-policy/">code signing policy</a>.
+          <b>First run.</b> FrameScale isn't code-signed yet. On Windows, if SmartScreen appears, choose <i>More info → Run anyway</i>. On macOS, the Terminal line above avoids the security prompt; if you install the .dmg instead, open <i>System Settings → Privacy &amp; Security → Open Anyway</i> the first time. Details are in the <a href="https://github.com/seldin-puce/framescale#download">README</a> and the <a href="/code-signing-policy/">code signing policy</a>.
         </div>
         <div>
           <pre class="term"><span class="c"># or build it yourself</span>
@@ -456,6 +461,36 @@ pnpm build</pre>
 </footer>
 
 <script>
+  // Download buttons fetch the file straight from the latest GitHub release
+  // (asset names carry the version); without the API they open the release page.
+  (function () {
+    var links = document.querySelectorAll("a[data-asset]");
+    if (!links.length || !window.fetch) return;
+    fetch("https://api.github.com/repos/seldin-puce/framescale/releases/latest")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        if (!rel || !rel.assets) return;
+        links.forEach(function (a) {
+          var suffix = a.getAttribute("data-asset");
+          var hit = rel.assets.find(function (x) { return x.name.slice(-suffix.length) === suffix; });
+          if (hit) {
+            a.href = hit.browser_download_url;
+            a.title = hit.name + " (" + Math.round(hit.size / 1048576) + " MB, " + rel.tag_name + ")";
+          }
+        });
+      })
+      .catch(function () {});
+  })();
+
+  // Copy buttons.
+  document.querySelectorAll("button.copy").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var text = document.getElementById(b.getAttribute("data-copy")).textContent;
+      var done = function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1600); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+  });
+
   // Before/after slider: the range input drives the split position.
   (function () {
     var ba = document.getElementById("ba");

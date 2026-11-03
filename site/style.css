@@ -117,6 +117,12 @@
   }
   .dl .files a:hover { border-color: var(--accent); }
   .dl .files small { color: var(--subtle); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .dl .files .or { font-size: 12px; color: var(--subtle); }
+  .dl kbd { font: 12px ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--raised); color: var(--fg); }
+  .cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 8px 8px 12px; border-radius: 10px; background: #070a12; border: 1px solid var(--accent); }
+  .cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; color: var(--fg); }
+  .cmd .copy { flex: none; border: 0; border-radius: 7px; padding: 6px 12px; background: var(--accent); color: #fff; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .cmd .copy:hover { background: var(--accent-hover); }
   pre.term {
     background: #070a12; border: 1px solid var(--border); border-radius: var(--radius);
     padding: 18px 20px; overflow-x: auto; color: #cdd6e6; font-size: 14px; line-height: 1.7; margin: 0;
