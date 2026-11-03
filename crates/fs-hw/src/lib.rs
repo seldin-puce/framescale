@@ -4,18 +4,21 @@
 //!   on macOS). Devices are identified by UUID, never by index.
 //! - [`rank`]: discrete ≫ integrated, then memory and compute features.
 //! - [`telemetry`]: NVML (NVIDIA), sysfs (AMD/Intel on Linux), WDDM perf data
-//!   and GPU Engine counters (any GPU on Windows), and `VK_EXT_memory_budget`
-//!   (vendor-neutral VRAM), merged per field.
+//!   and GPU Engine counters (any GPU on Windows), IOKit / IOReport / SMC
+//!   (Apple Silicon), and `VK_EXT_memory_budget` (vendor-neutral VRAM),
+//!   merged per field.
 //! - [`governor`]: Eco mode duty-cycle controller.
 //!
 //! `unsafe` is denied crate-wide and allowed only in the FFI modules (Vulkan,
-//! Windows telemetry, the battery query).
+//! Windows and macOS telemetry, the battery query).
 #![deny(unsafe_code)]
 
 pub mod governor;
 pub mod power;
 pub mod rank;
 pub mod telemetry;
+#[cfg(target_os = "macos")]
+mod telemetry_macos;
 #[cfg(windows)]
 mod telemetry_windows;
 pub mod vulkan;

@@ -55,6 +55,13 @@ impl Sampler {
         {
             sources.push(Box::new(s));
         }
+        // Apple Silicon: load, power and temperature (one GPU per Mac).
+        #[cfg(target_os = "macos")]
+        if device.vendor == Vendor::Apple
+            && let Some(s) = crate::telemetry_macos::AppleGpuSource::new()
+        {
+            sources.push(Box::new(s));
+        }
         if let Some(vk) = vulkan {
             sources.push(Box::new(VulkanBudgetSource {
                 ctx: vk,
