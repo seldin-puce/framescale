@@ -94,6 +94,18 @@ sha256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96"
 select  = ["models/realesrgan-x4plus.", "models/realesrgan-x4plus-anime.", "models/realesr-animevideov3-"]
 dest    = "realesrgan"
 
+# RealESRGAN_x2plus (xinntao, BSD-3-Clause): the ×2 sibling of x4plus, which
+# the engine runs for "Real-ESRGAN x4+" at ×2. No official ncnn export, so
+# `convert = "rrdb"` builds it from the official .pth (see below).
+[[models]]
+id      = "realesrgan-x2plus"
+license = "BSD-3-Clause"
+url     = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+sha256  = "49fafd45f8fd7aa8d31ab2a22d14d91b536c34494a5cfe31eb5d89c2fa266abb"
+convert = "rrdb"
+file    = "realesrgan-x2plus"
+dest    = "realesrgan/models"
+
 # Real-ESRGAN General v3 (xinntao, BSD-3-Clause): the fast live-action ×4
 # SRVGGNetCompact and its weak-denoise twin. There's no official ncnn release,
 # so `convert = "srvgg"` turns the official .pth into ncnn at build time (the

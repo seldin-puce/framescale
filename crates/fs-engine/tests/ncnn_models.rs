@@ -118,22 +118,42 @@ fn real_models_on_every_device() {
             "SR output equals nearest-neighbour"
         );
 
-        // x4plus at ×2: native ×4 then exact area downscale.
-        let mut b4 = NcnnBackend::new(
-            &plan(
-                vec![StageConfig::Upscale {
-                    model: m("realesrgan-x4plus"),
-                    scale: 2,
-                    denoise: None,
-                }],
-                &models,
-            ),
-            dev.clone(),
-            4,
-        )
-        .expect("load x4plus");
-        let o = b4.process(&src, 512).expect("x4plus");
+        // x4plus at ×2 runs the converted x2plus; ×3 runs x4plus, area-downscaled.
+        let load_x4 = |scale| {
+            NcnnBackend::new(
+                &plan(
+                    vec![StageConfig::Upscale {
+                        model: m("realesrgan-x4plus"),
+                        scale,
+                        denoise: None,
+                    }],
+                    &models,
+                ),
+                dev.clone(),
+                4,
+            )
+            .expect("load x4plus")
+        };
+        let mut b2 = load_x4(2);
+        let o = b2.process(&src, 512).expect("x2plus");
         assert_eq!((o.width, o.height), (128, 96));
+        assert!(
+            mean_abs_diff(&o, &big) < 12.0,
+            "x2plus is a sane ×2: {}",
+            mean_abs_diff(&o, &big)
+        );
+        // Odd frame sizes: padded to even for the unshuffle, cropped back.
+        let odd = test_frame(63, 47, 0);
+        let whole = b2.process(&odd, 512).expect("x2plus odd");
+        assert_eq!((whole.width, whole.height), (126, 94));
+        // Tiny 25 px tiles (rounded to 24): RRDB's wide receptive field leaves
+        // ~1 level at seams with 10 px context, as x4plus does (0.93).
+        let tiled = b2.process(&odd, 25).expect("x2plus odd tiles");
+        let seam = mean_abs_diff(&whole, &tiled);
+        eprintln!("   x2plus tile seam mean |Δ| = {seam:.3}");
+        assert!(seam < 1.3, "x2plus tile seams: {seam}");
+        let o3 = load_x4(3).process(&src, 512).expect("x4plus ×3");
+        assert_eq!((o3.width, o3.height), (192, 144));
 
         // RIFE (custom rife.Warp layer), every bundled version: identical
         // inputs → (almost) the same frame; a 6 px move → close to the 3 px

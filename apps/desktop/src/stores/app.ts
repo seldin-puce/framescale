@@ -59,8 +59,9 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
     { id: "realcugan-pro", label: "Real-CUGAN Pro (finer detail)" },
   ],
   upscale: [
-    { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+ (live action)" },
     { id: "realesr-general-x4v3", label: "Real-ESRGAN General v3 (live action, fast)" },
+    // ×2 runs RealESRGAN_x2plus, ×3/×4 run x4plus (fs-engine resolve_sr).
+    { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+/x2+ (live action, slow)" },
     { id: "realesrgan-x4plus-anime", label: "Real-ESRGAN x4+ Anime" },
     { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
@@ -248,7 +249,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   stages: {
     deinterlace: defaults(false, "bwdif"),
     denoise: defaults(false, "nafnet-sidd"),
-    upscale: defaults(true, "realesrgan-x4plus"),
+    upscale: defaults(true, GENERAL_V3),
     faceFix: defaults(false, "codeformer"),
     interpolate: defaults(false, "rife-v4.25"),
   },

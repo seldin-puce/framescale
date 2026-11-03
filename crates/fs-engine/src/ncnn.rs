@@ -156,6 +156,8 @@ struct Sr {
     model: UniquePtr<ffi::Model>,
     native: usize,
     target: usize,
+    /// Tile sides must be multiples of this (RRDBNet ×2 pixel-unshuffles by 2).
+    align: usize,
 }
 
 /// Context Real-CUGAN ×2 consumes on each side (valid convolutions:
@@ -523,6 +525,8 @@ fn resolve_cugan(models: &Path, id: &str, strength: u8) -> Result<(PathBuf, Path
 }
 
 /// `(param, bin, native_scale)` for an upscale model id at a requested scale.
+/// Real-ESRGAN x4+ at ×2 runs its ×2 sibling (RealESRGAN_x2plus): the same
+/// network on pixel-unshuffled input, about 4× less work than ×4 + downscale.
 fn resolve_sr(
     models: &Path,
     id: &str,
@@ -530,6 +534,7 @@ fn resolve_sr(
 ) -> Result<(PathBuf, PathBuf, usize), EngineError> {
     let (name, native) = match id {
         "realesr-animevideov3" => (format!("realesr-animevideov3-x{scale}"), scale),
+        "realesrgan-x4plus" if scale == 2 => (X2PLUS.to_owned(), 2),
         "realesrgan-x4plus" | "realesrgan-x4plus-anime" | GENERAL_V3 => (id.to_owned(), 4),
         other => {
             return Err(EngineError::ModelNotFound(format!(
@@ -544,6 +549,9 @@ fn resolve_sr(
         native,
     ))
 }
+
+/// RealESRGAN_x2plus, converted at build time (`cargo xtask models`).
+const X2PLUS: &str = "realesrgan-x2plus";
 
 /// Real-ESRGAN General v3 (live action): two checkpoints, blended by the
 /// denoise strength like the official `--denoise_strength` (DNI).
@@ -705,6 +713,11 @@ impl NcnnBackend {
                         model: net,
                         native,
                         target: usize::from(*scale),
+                        align: if param.ends_with(format!("{X2PLUS}.param")) {
+                            2
+                        } else {
+                            1
+                        },
                     });
                 }
                 StageConfig::Interpolate { model, .. } => {
@@ -802,27 +815,42 @@ impl InferenceBackend for NcnnBackend {
             }
             return Ok(planar::to_frame(&img, input.format));
         };
-        let (native, model) = (sr.native, &sr.model);
+        let (native, model, align) = (sr.native, &sr.model, sr.align);
         planar::tiled_into(
             &img,
-            tile as usize,
+            // Aligned tiles (SR_PAD is even) keep every tile's 2×2 unshuffle
+            // grid in phase with the frame's, or neighbours disagree at seams.
+            (tile as usize / align * align).max(16),
             SR_PAD,
             native,
             workers,
             &mut self.scratch,
             |t| {
-                let mut o = Planar::zeros(t.w * native, t.h * native);
+                // Odd frame sizes: repeat the last row/column, crop it after.
+                let (w, h) = (t.w.next_multiple_of(align), t.h.next_multiple_of(align));
+                let padded;
+                let src = if (w, h) == (t.w, t.h) {
+                    t
+                } else {
+                    padded = t.region(0, 0, w, h);
+                    &padded
+                };
+                let mut o = Planar::zeros(w * native, h * native);
                 model
                     .run_sr(
-                        &t.data,
-                        t.w as i32,
-                        t.h as i32,
+                        &src.data,
+                        w as i32,
+                        h as i32,
                         &mut o.data,
                         o.w as i32,
                         o.h as i32,
                     )
                     .map_err(|e| map_err(&e, tile))?;
-                Ok(o)
+                Ok(if (w, h) == (t.w, t.h) {
+                    o
+                } else {
+                    o.region(0, 0, t.w * native, t.h * native)
+                })
             },
         )?;
         // Face Fix works on the final (upscaled) pixels.
@@ -904,8 +932,11 @@ mod tests {
         let (p, _, n) = resolve_sr(m, "realesr-animevideov3", 3).expect("anime");
         assert!(p.ends_with("realesrgan/models/realesr-animevideov3-x3.param"));
         assert_eq!(n, 3);
+        let (p, _, n) = resolve_sr(m, "realesrgan-x4plus", 2).expect("x2");
+        assert!(p.ends_with("realesrgan/models/realesrgan-x2plus.param"));
+        assert_eq!(n, 2, "×2 runs the native ×2 sibling");
         assert_eq!(
-            resolve_sr(m, "realesrgan-x4plus", 2).expect("x4").2,
+            resolve_sr(m, "realesrgan-x4plus", 3).expect("x3").2,
             4,
             "native ×4, area-downscaled"
         );

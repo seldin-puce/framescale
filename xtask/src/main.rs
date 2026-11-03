@@ -53,7 +53,7 @@ enum Cmd {
     /// Convert a PyTorch checkpoint to ncnn (`<dir>/<stem>.param` + `.bin`),
     /// as `models` does for entries with `convert`.
     Convert {
-        /// Converter: `srvgg`.
+        /// Converter: `srvgg`, `nafnet` or `rrdb`.
         kind: String,
         pth: std::path::PathBuf,
         dir: std::path::PathBuf,

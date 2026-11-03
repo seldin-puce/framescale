@@ -193,15 +193,15 @@ pub fn srvgg(t: &BTreeMap<String, Tensor>, dir: &Path, stem: &str) -> Result<()>
     g.write(dir, stem)
 }
 
-/// NAFNet (megvii, "Simple Baselines for Image Restoration") builder: unique
-/// blob names, explicit Splits for every blob read twice (ncnn requires it).
-struct Naf<'a> {
+/// Graph builder for the larger networks (NAFNet, RRDBNet): unique blob
+/// names, explicit Splits for every blob read twice (ncnn requires it).
+struct Net<'a> {
     t: &'a BTreeMap<String, Tensor>,
     g: Graph,
     n: usize,
 }
 
-impl Naf<'_> {
+impl Net<'_> {
     fn blob(&mut self, tag: &str) -> String {
         self.n += 1;
         format!("{tag}{}", self.n)
@@ -259,6 +259,73 @@ impl Naf<'_> {
             self.g.raw(b);
         }
         y
+    }
+
+    /// 3×3 convolution (stride 1, pad 1) from checkpoint `key`, optionally
+    /// fused with LeakyReLU(0.2); weights and bias are multiplied by `scale`.
+    fn conv3(&mut self, x: &str, key: &str, lrelu: bool, scale: f32) -> Result<String> {
+        let (w, b) = (
+            self.get(&format!("{key}.weight"))?,
+            self.get(&format!("{key}.bias"))?,
+        );
+        ensure!(
+            w.shape.len() == 4 && w.shape[2] == 3 && w.shape[3] == 3,
+            "{key}: 3×3 conv expected"
+        );
+        let out = w.shape[0];
+        let fw: Vec<f32> = w.data.iter().map(|v| v * scale).collect();
+        let fb: Vec<f32> = b.data.iter().map(|v| v * scale).collect();
+        let y = self.blob("c");
+        let name = self.blob("conv");
+        let act = if lrelu {
+            " 9=2 -23310=1,2.000000e-01"
+        } else {
+            ""
+        };
+        self.g.layer(
+            "Convolution",
+            &name,
+            &[x],
+            &[&y],
+            &format!("0={out} 1=3 3=1 4=1 5=1 6={}{act}", fw.len()),
+        );
+        self.g.flagged(&fw);
+        self.g.raw(&fb);
+        Ok(y)
+    }
+
+    fn concat(&mut self, a: &str, b: &str) -> String {
+        let y = self.blob("cat");
+        let name = self.blob("concat");
+        self.g.layer("Concat", &name, &[a, b], &[&y], "0=0");
+        y
+    }
+
+    /// Nearest-neighbour ×2.
+    fn up2(&mut self, x: &str) -> String {
+        let y = self.blob("u");
+        let name = self.blob("interp");
+        self.g
+            .layer("Interp", &name, &[x], &[&y], "0=1 1=2.0 2=2.0");
+        y
+    }
+
+    /// Residual dense block: five convs over the growing concatenation of
+    /// the input and every earlier output; `x + 0.2·conv5(…)` (the 0.2 is
+    /// folded into conv5). Concats chain, so each blob is read at most twice.
+    fn rdb(&mut self, x: &str, p: &str) -> Result<String> {
+        let (x, skip) = self.split(x);
+        let (x, x_in) = self.split(&x);
+        let mut cat = x;
+        let x1 = self.conv3(&x_in, &format!("{p}.conv1"), true, 1.0)?;
+        cat = self.concat(&cat, &x1);
+        for i in 2..=4 {
+            let (c, c_in) = self.split(&cat);
+            let xi = self.conv3(&c_in, &format!("{p}.conv{i}"), true, 1.0)?;
+            cat = self.concat(&c, &xi);
+        }
+        let x5 = self.conv3(&cat, &format!("{p}.conv5"), false, 0.2)?;
+        Ok(self.binary(&x5, &skip, 0))
     }
 
     fn binary(&mut self, a: &str, b: &str, op: u8) -> String {
@@ -390,7 +457,7 @@ impl Naf<'_> {
 /// RGB 0–1 in, RGB out, same size; sides must be multiples of 2^levels (16).
 /// Blobs: `data` → `output`.
 pub fn nafnet(t: &BTreeMap<String, Tensor>, dir: &Path, stem: &str) -> Result<()> {
-    let mut m = Naf {
+    let mut m = Net {
         t,
         g: Graph {
             half: true,
@@ -436,12 +503,89 @@ pub fn nafnet(t: &BTreeMap<String, Tensor>, dir: &Path, stem: &str) -> Result<()
     m.g.write(dir, stem)
 }
 
+/// Real-ESRGAN's RRDBNet (RealESRGAN_x4plus, RealESRGAN_x2plus): the ×2 and
+/// ×1 variants pixel-unshuffle the input first (ncnn Reorg mode 0 is PyTorch's
+/// channel order), so the 23 RRDBs run at a quarter (×2) of the pixels.
+/// Blobs: `data` (RGB 0–1) → `output`, mirroring the official ncnn export.
+pub fn rrdb(t: &BTreeMap<String, Tensor>, dir: &Path, stem: &str) -> Result<()> {
+    let first = get(t, "conv_first.weight")?;
+    let unshuffle = match first.shape.get(1) {
+        Some(3) => 1,
+        Some(12) => 2,
+        Some(48) => 4,
+        _ => bail!("not an RRDBNet checkpoint (conv_first {:?})", first.shape),
+    };
+    let blocks = (0..)
+        .take_while(|i| t.contains_key(&format!("body.{i}.rdb1.conv1.weight")))
+        .count();
+    ensure!(blocks > 0, "RRDBNet without RRDB blocks");
+    let mut m = Net {
+        t,
+        g: Graph {
+            half: true,
+            ..Graph::default()
+        },
+        n: 0,
+    };
+    m.g.layer("Input", "input", &[], &["data"], "");
+    let mut x = "data".to_owned();
+    if unshuffle > 1 {
+        m.g.layer(
+            "Reorg",
+            "unshuffle",
+            &[&x],
+            &["unshuffled"],
+            &format!("0={unshuffle}"),
+        );
+        x = "unshuffled".to_owned();
+    }
+    let feat = m.conv3(&x, "conv_first", false, 1.0)?;
+    let (mut body, feat_skip) = m.split(&feat);
+    for i in 0..blocks {
+        // RRDB: three dense blocks, then x + 0.2·(…).
+        let (y, skip) = m.split(&body);
+        let mut y = y;
+        for r in 1..=3 {
+            y = m.rdb(&y, &format!("body.{i}.rdb{r}"))?;
+        }
+        let out = m.blob("e");
+        let name = m.blob("rrdb");
+        m.g.layer(
+            "Eltwise",
+            &name,
+            &[&y, &skip],
+            &[&out],
+            "0=1 -23301=2,2.000000e-01,1.000000e+00",
+        );
+        body = out;
+    }
+    let body = m.conv3(&body, "conv_body", false, 1.0)?;
+    let mut x = m.binary(&body, &feat_skip, 0);
+    for up in ["conv_up1", "conv_up2"] {
+        let u = m.up2(&x);
+        x = m.conv3(&u, up, true, 1.0)?;
+    }
+    let hr = m.conv3(&x, "conv_hr", true, 1.0)?;
+    let (w, b) = (get(t, "conv_last.weight")?, get(t, "conv_last.bias")?);
+    m.g.layer(
+        "Convolution",
+        "conv_last",
+        &[&hr],
+        &["output"],
+        &format!("0={} 1=3 3=1 4=1 5=1 6={}", w.shape[0], w.data.len()),
+    );
+    m.g.flagged(&w.data);
+    m.g.raw(&b.data);
+    m.g.write(dir, stem)
+}
+
 /// Run the named converter on a downloaded checkpoint.
 pub fn run(kind: &str, pth: &Path, dir: &Path, stem: &str) -> Result<()> {
     let tensors = crate::pth::load(pth)?;
     match kind {
         "srvgg" => srvgg(&tensors, dir, stem),
         "nafnet" => nafnet(&tensors, dir, stem),
+        "rrdb" => rrdb(&tensors, dir, stem),
         _ => bail!("unknown converter `{kind}`"),
     }
 }

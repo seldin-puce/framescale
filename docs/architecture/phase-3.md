@@ -19,7 +19,14 @@
   Vulkan via SimpleVK (no SDK; the loader is dlopen'd) and ncnn's
   self-contained OpenMP on Linux/macOS. `cpp/bridge.cpp` is a cxx bridge.
 - Models: Real-ESRGAN x4plus / x4plus-anime (native ×4, exact area-downscale to
-  ×2/×3), AnimeVideo-v3 ×2/×3/×4 and General v3 (live action, native ×4).
+  ×2/×3), AnimeVideo-v3 ×2/×3/×4 and General v3 (live action, native ×4, the
+  default). "x4plus" at ×2 runs RealESRGAN_x2plus instead: the same RRDBNet on
+  pixel-unshuffled input (ncnn `Reorg`), converted at build time
+  (`convert = "rrdb"`), ~3.4× faster than ×4 + downscale. Its tiles are kept
+  even so each tile's 2×2 unshuffle grid stays in phase with the frame (odd
+  tiles doubled the seam error). Checks: our x4plus conversion vs the
+  official ncnn export mean 0.14 / max 5 levels; x2plus (GPU fp16) vs
+  PyTorch mean 0.86 levels, as close as the official x4plus export (0.63).
   General v3 has no official ncnn export: `cargo xtask models` converts the
   official .pth (`convert = "srvgg"`: the pickle is interpreted with an
   allow-list, never executed) into fp32 ncnn files. Converting AnimeVideo-v3
@@ -50,6 +57,7 @@ plus CPU-side conversion; excludes decode/encode):
 | Real-ESR AnimeVideo-v3 ×2, 1920×1080 → 3840×2160 | **10.9** |
 | Real-ESRGAN x4plus ×4, 960×540 → 3840×2160 | **1.31** |
 | Real-ESRGAN x4plus ×2, 1920×1080 → 3840×2160 | 0.31 |
+| Real-ESRGAN x4plus ×2 via x2plus, 1620×1080 → 3240×2160 (incl. load) | ~0.6 (was 0.18) |
 | Real-ESRGAN General v3 ×4, 960×540 → 3840×2160 | **13.5** |
 | Real-ESRGAN General v3 ×2, 1920×1080 → 3840×2160 | 2.4 |
 | NAFNet-SIDD denoise, 720×576 / 1920×1080 | 26.8 / 7.1 |

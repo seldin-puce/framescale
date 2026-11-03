@@ -52,7 +52,7 @@ macOS), and uses [FFmpeg](https://ffmpeg.org) for decoding and encoding.
 |---|---|
 | **Deinterlace** | Motion-adaptive BWDIF, at the same or double frame rate. |
 | **Denoise** | NAFNet for camera noise in live action; Real-CUGAN for anime and line art. Four strength levels. |
-| **Upscale** | ×2 or ×4 with Real-ESRGAN models for live action and anime. General v3 has a noise-removal slider. |
+| **Upscale** | ×2 or ×4 with Real-ESRGAN models for live action and anime. General v3 (the default) is fast and has a noise-removal slider; x4+ is the heaviest, and runs its ×2 sibling at ×2. |
 | **Face Fix** | Finds faces (YuNet) and restores them with CodeFormer, with a fidelity slider. |
 | **Interpolate** | ×2, ×3 or ×4 frame rate with RIFE. Frames are held, not morphed, across detected scene cuts. |
 
@@ -95,7 +95,7 @@ executed ([`xtask/src/pth.rs`](xtask/src/pth.rs)).
 |---|---|---|
 | Denoise | [NAFNet](https://github.com/megvii-research/NAFNet) SIDD width-32 (real camera noise) | MIT |
 | Denoise | [Real-CUGAN](https://github.com/bilibili/ailab) SE and Pro (anime) | MIT |
-| Upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) x4plus, x4plus-anime, AnimeVideo-v3, General v3 | BSD-3-Clause |
+| Upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) General v3, x4plus, x2plus, x4plus-anime, AnimeVideo-v3 | BSD-3-Clause |
 | Face Fix | [YuNet](https://github.com/opencv/opencv_zoo) face detector | MIT |
 | Face Fix | [CodeFormer](https://github.com/sczhou/CodeFormer) | **S-Lab License 1.0, non-commercial** |
 | Interpolate | [RIFE](https://github.com/hzwer/Practical-RIFE) 4.25 (default), 4.26, 4.22 lite, 4.6 | MIT |
