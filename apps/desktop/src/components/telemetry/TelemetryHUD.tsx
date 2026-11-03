@@ -185,7 +185,11 @@ export function TelemetryHUD() {
         <div className="grid grid-cols-3 gap-1.5">
           <Stat icon={Cpu} label="GPU load" value={pct(d?.utilizationPct)} />
           <Stat icon={Thermometer} label="Temp" value={temp == null ? DASH : `${Math.round(temp)}°C`} tone={tempTone} />
-          <Stat icon={Zap} label="Power" value={d?.powerW == null ? DASH : `${Math.round(d.powerW)} W`} />
+          <Stat
+            icon={Zap}
+            label="Power"
+            value={d?.powerW != null ? `${Math.round(d.powerW)} W` : d?.powerPct != null ? `${Math.round(d.powerPct)}%` : DASH}
+          />
         </div>
 
         <div className="flex items-center gap-2">

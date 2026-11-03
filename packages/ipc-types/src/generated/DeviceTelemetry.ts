@@ -5,4 +5,9 @@ import type { DeviceUuid } from "./DeviceUuid";
  * Every reading is optional: a vendor or OS may not expose it, and the HUD
  * shows "—" rather than a made-up number.
  */
-export type DeviceTelemetry = { uuid: DeviceUuid | null, utilizationPct: number | null, vramUsed: number | null, vramTotal: number | null, temperatureC: number | null, powerW: number | null, };
+export type DeviceTelemetry = { uuid: DeviceUuid | null, utilizationPct: number | null, vramUsed: number | null, vramTotal: number | null, temperatureC: number | null, powerW: number | null, 
+/**
+ * Power as a share of the board's limit, when watts aren't known
+ * (Windows reports this for every GPU).
+ */
+powerPct: number | null, };

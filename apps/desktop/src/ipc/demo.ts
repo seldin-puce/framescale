@@ -273,6 +273,7 @@ export function createDemoBackend(): Backend {
             vramTotal: 12 * GiB,
             temperatureC: temp,
             powerW: busy ? 140 + Math.random() * 40 : 18 + Math.random() * 4,
+            powerPct: null,
           },
           renderFps: renderFps == null ? null : renderFps * duty,
           eco: { mode: eco, duty, throttling: duty < 0.999, onBattery: false },

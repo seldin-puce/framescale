@@ -19,6 +19,9 @@ pub struct DeviceTelemetry {
     pub vram_total: Option<u64>,
     pub temperature_c: Option<f32>,
     pub power_w: Option<f32>,
+    /// Power as a share of the board's limit, when watts aren't known
+    /// (Windows reports this for every GPU).
+    pub power_pct: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, TS)]

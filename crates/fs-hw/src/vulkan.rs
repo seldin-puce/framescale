@@ -226,6 +226,19 @@ impl VulkanContext {
         })
     }
 
+    /// The device's Windows adapter LUID (`VkPhysicalDeviceIDProperties`), for
+    /// matching it in WDDM and performance-counter telemetry. `None` when the
+    /// driver doesn't report one (always, off Windows).
+    pub fn luid(&self, uuid: &DeviceUuid) -> Option<[u8; 8]> {
+        let (_, pd, _) = self.devices.iter().find(|(u, _, _)| u == uuid)?;
+        let mut id = vk::PhysicalDeviceIDProperties::default();
+        let mut p2 = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
+        // SAFETY: `pd` came from this instance, which is Vulkan 1.1+ (checked
+        // during discovery, which queries the same struct).
+        unsafe { self.instance.get_physical_device_properties2(*pd, &mut p2) };
+        (id.device_luid_valid == vk::TRUE).then_some(id.device_luid)
+    }
+
     /// System-wide VRAM `(used, total)` for a device, via `VK_EXT_memory_budget`.
     ///
     /// `heapBudget` is what *this* process may still allocate, i.e. heap size

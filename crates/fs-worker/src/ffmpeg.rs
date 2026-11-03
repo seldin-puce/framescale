@@ -235,7 +235,12 @@ impl SegmentEncoder {
 
 /// fsync a file and (on Unix) its directory, so a committed rename survives power loss.
 pub fn durable_rename(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::File::open(from)?.sync_all()?;
+    // Write access: on Windows, FlushFileBuffers on a read-only handle fails
+    // with "Access is denied" (every segment commit did).
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(from)?
+        .sync_all()?;
     std::fs::rename(from, to)?;
     #[cfg(unix)]
     if let Some(dir) = to.parent() {

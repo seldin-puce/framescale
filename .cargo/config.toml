@@ -11,3 +11,13 @@ TS_RS_EXPORT_DIR = { value = "packages/ipc-types/src/generated", relative = true
 # app or for the fs-worker sidecar.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# ncnn's simplevk declares vkGetInstanceProcAddr as a weak import on Apple: a
+# last-resort fallback for a statically linked MoltenVK, which we don't use
+# (MoltenVK is dlopen'd). Let it stay undefined (null at runtime) instead of
+# failing every macOS link.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-U,_vkGetInstanceProcAddr"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-U,_vkGetInstanceProcAddr"]

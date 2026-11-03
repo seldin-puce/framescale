@@ -45,6 +45,16 @@ impl Sampler {
         if let Some(s) = SysfsSource::new(&device) {
             sources.push(Box::new(s));
         }
+        // Windows: load, temperature and power share for any vendor (what
+        // Task Manager shows); NVML above still wins for NVIDIA.
+        #[cfg(windows)]
+        if let Some(s) = vulkan
+            .as_ref()
+            .and_then(|v| v.luid(&device.uuid))
+            .and_then(crate::telemetry_windows::WindowsGpuSource::new)
+        {
+            sources.push(Box::new(s));
+        }
         if let Some(vk) = vulkan {
             sources.push(Box::new(VulkanBudgetSource {
                 ctx: vk,
@@ -73,7 +83,7 @@ impl Sampler {
     }
 }
 
-fn set<T>(slot: &mut Option<T>, v: Option<T>) {
+pub(crate) fn set<T>(slot: &mut Option<T>, v: Option<T>) {
     if slot.is_none() {
         *slot = v;
     }
