@@ -63,11 +63,32 @@ fn cstr_field(bytes: &[std::ffi::c_char]) -> String {
     String::from_utf8_lossy(&b).into_owned()
 }
 
+/// The Vulkan entry point: `FS_VULKAN_DRIVER` when set; on macOS the MoltenVK
+/// bundled in `Contents/Frameworks` (Macs have no system Vulkan loader, and
+/// the worker's ncnn loads that same library, so device orders agree);
+/// otherwise the system loader.
+fn load_entry() -> Result<ash::Entry, ash::LoadingError> {
+    if let Some(p) = std::env::var_os("FS_VULKAN_DRIVER") {
+        // SAFETY: dlopen of the Vulkan library the user pointed us at.
+        return unsafe { ash::Entry::load_from(p) };
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(fw) = std::env::current_exe()
+        .ok()
+        .and_then(|e| Some(e.parent()?.join("../Frameworks/libMoltenVK.dylib")))
+        .filter(|p| p.exists())
+    {
+        // SAFETY: the MoltenVK we ship; it exports vkGetInstanceProcAddr.
+        return unsafe { ash::Entry::load_from(fw) };
+    }
+    // SAFETY: dlopen of the system Vulkan loader. The Entry keeps it loaded.
+    unsafe { ash::Entry::load() }
+}
+
 impl VulkanContext {
     /// Load the loader, create an instance, and describe every physical device.
     pub fn discover() -> Result<(Self, Vec<GpuDevice>), DiscoveryError> {
-        // SAFETY: dlopen of the system Vulkan loader. The Entry keeps it loaded.
-        let entry = unsafe { ash::Entry::load()? };
+        let entry = load_entry()?;
         // SAFETY: valid entry; returns None on 1.0-only loaders.
         let instance_version =
             unsafe { entry.try_enumerate_instance_version()? }.unwrap_or(vk::API_VERSION_1_0);
