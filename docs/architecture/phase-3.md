@@ -70,8 +70,24 @@ than the 9070 XT, which the default ranking correctly avoids.
 
 ## Known open items
 
-- **Denoise (Real-CUGAN)** and **Face Fix (BYOM)**: shown as "Soon"; the host
-  rejects them at enqueue. Real-CUGAN needs its multi-pass cache pipeline.
+- **Denoise (Real-CUGAN)** (done): a 1× stage, Real-CUGAN ×2 at the chosen
+  level (SE: conservative, denoise 1x/2x/3x; Pro: conservative, 3x), then an
+  exact area downscale. Its SE blocks pool globally (`gap0…gap3`), so tiling
+  alone gives each tile its own brightness/contrast. Each frame runs one
+  statistics pass on a ≤512² downscale (the "very rough" sync of
+  realcugan-ncnn-vulkan) and every tile gets those means injected. Tiled output
+  matches one whole-frame tile (GPU max Δ 1/255). The ncnn Pro models use plain
+  0–1 RGB (measured; the PyTorch `(x-0.15)/0.7` is already folded in).
+- **Face Fix** (done, bring-your-own CodeFormer): YuNet (bundled, MIT) finds
+  faces and 5 landmarks on a 640² letterbox; each face is aligned to the FFHQ
+  512 template (least-squares similarity), restored by the user's
+  CodeFormer-ncnn (encoder, CPU top-1 codebook lookup, generator) and pasted
+  back with a 10 % feathered border. Runs after Upscale on the final pixels.
+  The conversion bakes CodeFormer's fidelity `w` into four fuse `Eltwise`
+  coefficients (`1, 0.7`); the generator param is rewritten in memory, so the
+  fidelity slider is real. Measured: about 240 ms per face on RX 9070 XT,
+  2.2 s per face on CPU. Faces aren't tracked across frames (no temporal
+  smoothing yet).
 - Windows CPU path is single-threaded (MSVC OpenMP needs vcomp140.dll).
 - SR pre/post-processing runs on the CPU (u8/u16 ⇄ f32); GPU shaders for it are an
   optimisation for later.

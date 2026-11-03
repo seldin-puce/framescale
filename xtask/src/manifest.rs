@@ -68,7 +68,12 @@ pub struct Model {
     pub license: String,
     #[serde(flatten)]
     pub artifact: Artifact,
+    /// Archive entries to extract (zip artifacts).
+    #[serde(default)]
     pub select: Vec<String>,
+    /// Single-file artifact: stored as `dest/<file>` (no archive).
+    #[serde(default)]
+    pub file: Option<String>,
     pub dest: String,
 }
 

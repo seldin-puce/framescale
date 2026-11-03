@@ -14,6 +14,7 @@ links = "fs_ncnn"
 ncnn = ["dep:cxx", "dep:cxx-build", "dep:cmake"]
 
 [dependencies]
+tracing = { workspace = true }
 fs-types    = { workspace = true }
 thiserror   = { workspace = true }
 xxhash-rust = { workspace = true }

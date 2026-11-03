@@ -78,6 +78,8 @@ export interface Backend {
   compareClose(session: string): Promise<void>;
   /** Folder picker for the output destination; null if cancelled. */
   pickFolder(): Promise<string | null>;
+  /** Rejects with a message unless `path` holds a CodeFormer-ncnn model. */
+  checkFaceModel(path: string): Promise<void>;
   subscribeJobs(cb: (e: JobEvent) => void): Promise<Unsubscribe>;
   subscribeTelemetry(cb: (t: Telemetry) => void): Promise<Unsubscribe>;
   pickFiles(): Promise<string[]>;

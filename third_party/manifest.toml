@@ -93,6 +93,32 @@ sha256 = "d745174bd04c0232c89d935b74799311008fda06bea4195f61be5f0f3cc087cb"
 select  = ["models-se/", "models-pro/"]
 dest    = "realcugan"
 
+# YuNet face detector (OpenCV Zoo, MIT), ncnn conversion. Face Fix uses it to
+# find faces and their 5 landmarks; the restoration model is the user's own.
+[[models]]
+id      = "yunet"
+license = "MIT"
+url     = "https://huggingface.co/lightcella/face-pipeline-ncnn/resolve/babe70cef9771e4450a6737f7b86b6d2e00bd943/detector/yunet_2023mar.ncnn.param"
+sha256  = "b5b3d417feee8493f735eb95b82cca07a6ddf2652c7c6e9171b69506d57b1700"
+file    = "yunet_2023mar.ncnn.param"
+dest    = "yunet"
+
+[[models]]
+id      = "yunet"
+license = "MIT"
+url     = "https://huggingface.co/lightcella/face-pipeline-ncnn/resolve/babe70cef9771e4450a6737f7b86b6d2e00bd943/detector/yunet_2023mar.ncnn.bin"
+sha256  = "8faa696d61ad6bf5c13ed5d6c8ae35e376c660968db53d723a329020856ca5c9"
+file    = "yunet_2023mar.ncnn.bin"
+dest    = "yunet"
+
+[[models]]
+id      = "yunet"
+license = "MIT"
+url     = "https://huggingface.co/lightcella/face-pipeline-ncnn/resolve/babe70cef9771e4450a6737f7b86b6d2e00bd943/detector/LICENSE"
+sha256  = "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958"
+file    = "LICENSE"
+dest    = "yunet"
+
 [[models]]
 id      = "rife"
 license = "MIT"

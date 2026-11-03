@@ -9,7 +9,7 @@ export const STAGE_META: Record<StageKind, { label: string; icon: typeof Layers;
   deinterlace: { label: "Deinterlace", icon: Layers, hint: "BWDIF" },
   denoise: { label: "Denoise", icon: Waves, hint: "Real-CUGAN" },
   upscale: { label: "Upscale", icon: ImageUpscale, hint: "Real-ESRGAN" },
-  faceFix: { label: "Face Fix", icon: ScanFace, hint: "BYOM" },
+  faceFix: { label: "Face Fix", icon: ScanFace, hint: "CodeFormer" },
   interpolate: { label: "Interpolate", icon: Blend, hint: "RIFE" },
 };
 

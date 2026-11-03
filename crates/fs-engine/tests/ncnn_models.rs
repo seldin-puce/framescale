@@ -162,9 +162,13 @@ fn real_models_on_every_device() {
             "padding to 32 is cropped back"
         );
         assert!(mean_abs_diff(&mid, &src) > 0.5 && mean_abs_diff(&mid, &moved) > 0.5);
+
+        // Inside the device loop: ncnn::shutdown() below ends Vulkan for good.
+        check_real_cugan(&dev, &models);
+        check_face_fix(&dev, &models);
     }
 
-    // Unsupported stages are rejected, not silently skipped.
+    // Face Fix without the user's model folder fails with a clear message.
     let dev = DeviceSel {
         index: -1,
         name: "CPU".into(),
@@ -172,16 +176,261 @@ fn real_models_on_every_device() {
     };
     let err = NcnnBackend::new(
         &plan(
-            vec![StageConfig::Denoise {
-                model: m("realcugan-se"),
-                strength: 1,
+            vec![StageConfig::FaceFix {
+                model: m("codeformer"),
+                fidelity: 0.5,
             }],
             &models,
         ),
         dev,
         1,
     )
-    .expect_err("denoise unsupported");
-    assert!(err.to_string().contains("not available"), "{err}");
+    .expect_err("face fix needs a model folder");
+    assert!(err.to_string().contains("CodeFormer model folder"), "{err}");
     ncnn::shutdown();
+}
+
+/// Deterministic noise (LCG), roughly ±`amp` levels.
+fn noisy(f: &Frame, amp: i32) -> Frame {
+    let mut state = 0x2545_f491_u32;
+    let data = f
+        .data
+        .iter()
+        .map(|&v| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let n = ((state >> 16) % (2 * amp as u32 + 1)) as i32 - amp;
+            (i32::from(v) + n).clamp(0, 255) as u8
+        })
+        .collect();
+    Frame::new(f.width, f.height, f.format, data)
+}
+
+fn mean(f: &Frame) -> f32 {
+    f.data.iter().map(|&v| f32::from(v)).sum::<f32>() / f.data.len() as f32
+}
+
+fn max_abs_diff(a: &Frame, b: &Frame) -> u8 {
+    a.data
+        .iter()
+        .zip(&b.data)
+        .map(|(x, y)| x.abs_diff(*y))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Denoise (Real-CUGAN): removes noise at the input size, keeps brightness
+/// (SE and Pro), and is seam-free: small tiles with the injected whole-frame
+/// SE statistics match a single tile.
+fn check_real_cugan(dev: &DeviceSel, models: &std::path::Path) {
+    if !models.join("realcugan").exists() {
+        return eprintln!("   skip Real-CUGAN: models missing");
+    }
+    let stage = |id: &str, strength: u8| StageConfig::Denoise {
+        model: ModelRef {
+            id: id.into(),
+            path: None,
+        },
+        strength,
+    };
+    let clean = test_frame(160, 120, 0);
+    let dirty = noisy(&clean, 24);
+    let mut b = NcnnBackend::new(
+        &plan(vec![stage("realcugan-se", 3)], models),
+        dev.clone(),
+        4,
+    )
+    .expect("load realcugan-se denoise3x");
+    let whole = b.process(&dirty, 256).expect("cugan one tile");
+    let tiled = b.process(&dirty, 32).expect("cugan 20 tiles");
+    assert_eq!(
+        (whole.width, whole.height),
+        (160, 120),
+        "denoise keeps the size"
+    );
+    let (before, after) = (mean_abs_diff(&dirty, &clean), mean_abs_diff(&whole, &clean));
+    let seam = (mean_abs_diff(&whole, &tiled), max_abs_diff(&whole, &tiled));
+    eprintln!(
+        "   real-cugan se L3: |noisy-clean| {before:.2} -> |out-clean| {after:.2}; tiles vs whole mean {:.3} max {}",
+        seam.0, seam.1
+    );
+    assert!(
+        after < before * 0.6,
+        "denoise must remove most of the noise: {before} -> {after}"
+    );
+    assert!((mean(&whole) - mean(&clean)).abs() < 3.0, "brightness kept");
+    assert!(
+        seam.0 < 0.25 && seam.1 <= 4,
+        "tiling must be seam-free: {seam:?}"
+    );
+    // Odd sizes: the network needs even tiles; the extra column/row is cropped.
+    let odd = noisy(&test_frame(161, 119, 0), 24);
+    let a = b.process(&odd, 256).expect("odd whole");
+    let c = b.process(&odd, 32).expect("odd tiled");
+    assert_eq!((a.width, a.height, c.width, c.height), (161, 119, 161, 119));
+    let d = mean_abs_diff(&a, &c);
+    assert!(d < 0.25, "odd tiles seam-free: {d}");
+    assert!(
+        mean_abs_diff(&a, &test_frame(161, 119, 0)) < 5.0,
+        "odd frame denoised"
+    );
+
+    for (id, strength) in [
+        ("realcugan-se", 0),
+        ("realcugan-pro", 0),
+        ("realcugan-pro", 3),
+    ] {
+        let mut b = NcnnBackend::new(&plan(vec![stage(id, strength)], models), dev.clone(), 4)
+            .expect("load realcugan variant");
+        let out = b.process(&clean, 256).expect("cugan");
+        let (dm, d) = (
+            (mean(&out) - mean(&clean)).abs(),
+            mean_abs_diff(&out, &clean),
+        );
+        eprintln!("   {id} s{strength}: mean shift {dm:.2}, |out-clean| {d:.2}");
+        assert!(
+            dm < 3.0 && d < 12.0,
+            "{id} s{strength} must keep the image: shift {dm}, diff {d}"
+        );
+    }
+}
+
+fn env_path(k: &str) -> Option<PathBuf> {
+    std::env::var_os(k)
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+}
+
+/// Decode an image to RGB24 with FFmpeg (`FS_FFMPEG` / `FS_FFPROBE`).
+fn load_image(path: &std::path::Path) -> Option<Frame> {
+    let (ff, fp) = (env_path("FS_FFMPEG")?, env_path("FS_FFPROBE")?);
+    let dims = std::process::Command::new(fp)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    let dims = String::from_utf8_lossy(&dims.stdout);
+    let (w, h) = dims.trim().split_once(',')?;
+    let (w, h): (u32, u32) = (w.parse().ok()?, h.parse().ok()?);
+    let raw = std::process::Command::new(ff)
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .output()
+        .ok()?;
+    (raw.stdout.len() == (w * h * 3) as usize)
+        .then(|| Frame::new(w, h, FrameFormat::Rgb24, raw.stdout))
+}
+
+fn save_png(f: &Frame, path: &std::path::Path) {
+    let Some(ff) = env_path("FS_FFMPEG") else {
+        return;
+    };
+    let mut child = std::process::Command::new(ff)
+        .args([
+            "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s",
+        ])
+        .arg(format!("{}x{}", f.width, f.height))
+        .args(["-i", "-"])
+        .arg(path)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("ffmpeg");
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(&f.data)
+        .expect("write");
+    let _ = child.wait();
+}
+
+/// Mean per-channel value inside a rectangle.
+fn region_mean(f: &Frame, (x0, y0, x1, y1): (u32, u32, u32, u32), c: usize) -> f32 {
+    let mut s = 0.0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            s += f32::from(f.data[((y * f.width + x) * 3) as usize + c]);
+        }
+    }
+    s / ((x1 - x0) * (y1 - y0)) as f32
+}
+
+fn region_diff(a: &Frame, b: &Frame, (x0, y0, x1, y1): (u32, u32, u32, u32)) -> f32 {
+    let mut s = 0.0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            for c in 0..3 {
+                let i = ((y * a.width + x) * 3) as usize + c;
+                s += (f32::from(a.data[i]) - f32::from(b.data[i])).abs();
+            }
+        }
+    }
+    s / ((x1 - x0) * (y1 - y0) * 3) as f32
+}
+
+/// Face Fix with the user's own CodeFormer-ncnn (`FS_CODEFORMER` = folder) on
+/// a real photo (`FS_FACE_IMAGE`; one frontal face around x 150–330, y 40–230
+/// in the 600×337 test still): the face is restored, colours are kept, the
+/// background stays bit-identical and the fidelity setting matters.
+fn check_face_fix(dev: &DeviceSel, models: &std::path::Path) {
+    let (Some(cf), Some(img_path)) = (env_path("FS_CODEFORMER"), env_path("FS_FACE_IMAGE")) else {
+        return eprintln!("   skip Face Fix: set FS_CODEFORMER and FS_FACE_IMAGE");
+    };
+    let Some(src) = load_image(&img_path) else {
+        return eprintln!("   skip Face Fix: can't decode the image (FS_FFMPEG/FS_FFPROBE)");
+    };
+    let stage = |fidelity: f32| StageConfig::FaceFix {
+        model: ModelRef {
+            id: "codeformer".into(),
+            path: Some(cf.to_string_lossy().into()),
+        },
+        fidelity,
+    };
+    let run = |fidelity: f32| {
+        let mut b = NcnnBackend::new(&plan(vec![stage(fidelity)], models), dev.clone(), 4)
+            .expect("load face fix");
+        let t = std::time::Instant::now();
+        let out = b.process(&src, 256).expect("face fix");
+        (out, b.last_faces(), t.elapsed())
+    };
+    let (out, faces, took) = run(0.5);
+    let face = (170, 60, 310, 220);
+    let d_face = region_diff(&out, &src, face);
+    let corner = (src.width - 60, 0, src.width, 40);
+    eprintln!("   face fix: {faces} face(s) in {took:.2?}; face Δ {d_face:.2}");
+    if let Some(dir) = img_path.parent() {
+        save_png(
+            &out,
+            &dir.join(format!(
+                "fixed-{}.png",
+                if dev.index >= 0 { "gpu" } else { "cpu" }
+            )),
+        );
+    }
+    assert_eq!(faces, 1, "one frontal face");
+    assert!(d_face > 1.0, "the face must change: {d_face}");
+    assert!(d_face < 25.0, "restored, not replaced: {d_face}");
+    for c in 0..3 {
+        let (a, b) = (region_mean(&src, face, c), region_mean(&out, face, c));
+        assert!(
+            (a - b).abs() < 12.0,
+            "channel {c} mean {a} -> {b}: colours must be kept"
+        );
+    }
+    assert_eq!(region_diff(&out, &src, corner), 0.0, "background untouched");
+    let (sharp, _, _) = run(0.0);
+    let (faithful, _, _) = run(1.0);
+    let d_fid = region_diff(&sharp, &faithful, face);
+    eprintln!("   fidelity 0 vs 1: face Δ {d_fid:.2}");
+    assert!(d_fid > 0.5, "fidelity must change the result: {d_fid}");
 }

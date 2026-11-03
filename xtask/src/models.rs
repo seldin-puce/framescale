@@ -7,13 +7,25 @@ use crate::{archive, fetch, util};
 
 pub fn run(m: &Manifest) -> Result<()> {
     let root = util::tauri_dir().join("resources/models");
+    // Several entries may share a destination (single-file artifacts): clear
+    // each destination once, before anything is written into it.
+    let mut cleared = std::collections::HashSet::new();
     for model in &m.models {
-        let zip = fetch::fetch(&model.artifact)?;
         let dest = root.join(&model.dest);
-        if dest.exists() {
+        if cleared.insert(dest.clone()) && dest.exists() {
             std::fs::remove_dir_all(&dest)?;
         }
-        let n = archive::extract_zip_selected(&zip, &dest, &model.select)?;
+    }
+    for model in &m.models {
+        let fetched = fetch::fetch(&model.artifact)?;
+        let dest = root.join(&model.dest);
+        if let Some(file) = &model.file {
+            std::fs::create_dir_all(&dest)?;
+            std::fs::copy(&fetched, dest.join(file))?;
+            eprintln!("  ✓ model {:<10} {file}  ({})", model.id, model.license);
+            continue;
+        }
+        let n = archive::extract_zip_selected(&fetched, &dest, &model.select)?;
         if n == 0 {
             bail!(
                 "model '{}': no archive entries matched {:?}",

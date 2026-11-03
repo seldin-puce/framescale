@@ -173,17 +173,47 @@ fn unique_output(path: &str, taken: &std::collections::HashSet<String>) -> Strin
         .map_or_else(|| path.to_owned(), |c| c.to_string_lossy().into_owned())
 }
 
+/// What a CodeFormer-ncnn model folder must contain.
+const CODEFORMER_FILES: [&str; 4] = [
+    "encoder.param",
+    "encoder.bin",
+    "generator.param",
+    "generator.bin",
+];
+
+fn check_codeformer(dir: &std::path::Path) -> R<()> {
+    let missing: Vec<&str> = CODEFORMER_FILES
+        .into_iter()
+        .filter(|f| !dir.join(f).is_file())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(err(
+            "faceModel",
+            format!("{} is missing {}", dir.display(), missing.join(", ")),
+        ))
+    }
+}
+
+/// Is this a usable CodeFormer-ncnn folder? (Only fixed file names are
+/// checked for existence; nothing is read.)
+#[tauri::command]
+pub fn check_face_model(path: String) -> R<()> {
+    check_codeformer(std::path::Path::new(&path))
+}
+
 fn reject_unsupported(pipeline: &fs_types::PipelineSpec) -> R<()> {
-    if let Some(s) = pipeline.stages.iter().find(|s| {
-        matches!(
-            s,
-            fs_types::StageConfig::Denoise { .. } | fs_types::StageConfig::FaceFix { .. }
-        )
-    }) {
-        return Err(err(
-            "unsupported",
-            format!("{:?} isn't available in this build yet", s.kind()),
-        ));
+    for s in &pipeline.stages {
+        if let fs_types::StageConfig::FaceFix { model, .. } = s {
+            let Some(dir) = model.path.as_deref() else {
+                return Err(err(
+                    "faceModel",
+                    "Face Fix needs your CodeFormer model folder: choose it in the Face Fix stage",
+                ));
+            };
+            check_codeformer(std::path::Path::new(dir))?;
+        }
     }
     pipeline
         .validate()

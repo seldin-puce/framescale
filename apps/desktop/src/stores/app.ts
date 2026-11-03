@@ -35,22 +35,23 @@ export interface StageState {
 }
 
 /** Stages the inference engine doesn't run yet: shown, but not selectable. */
-export const COMING_SOON: ReadonlySet<StageKind> = new Set<StageKind>(["denoise", "faceFix"]);
+/** Stages shown but not runnable yet (none right now). */
+export const COMING_SOON: ReadonlySet<StageKind> = new Set<StageKind>();
 
 export const STAGE_ORDER: StageKind[] = ["deinterlace", "denoise", "upscale", "faceFix", "interpolate"];
 
 export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
   deinterlace: [{ id: "bwdif", label: "BWDIF (motion adaptive)" }],
   denoise: [
-    { id: "realcugan-se", label: "Real-CUGAN SE" },
-    { id: "realcugan-pro", label: "Real-CUGAN Pro" },
+    { id: "realcugan-se", label: "Real-CUGAN SE (4 levels)" },
+    { id: "realcugan-pro", label: "Real-CUGAN Pro (finer detail)" },
   ],
   upscale: [
     { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+ (live action)" },
     { id: "realesrgan-x4plus-anime", label: "Real-ESRGAN x4+ Anime" },
     { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
-  faceFix: [{ id: "byom", label: "Your model (CodeFormer / GFPGAN)" }],
+  faceFix: [{ id: "codeformer", label: "CodeFormer (your ncnn copy)" }],
   interpolate: [{ id: "rife-v4.6", label: "RIFE v4.6" }],
 };
 
@@ -221,7 +222,7 @@ export const useApp = create<AppStore>()((set, get) => ({
     deinterlace: defaults(false, "bwdif"),
     denoise: defaults(false, "realcugan-se"),
     upscale: defaults(true, "realesrgan-x4plus"),
-    faceFix: defaults(false, "byom"),
+    faceFix: defaults(false, "codeformer"),
     interpolate: defaults(false, "rife-v4.6"),
   },
   selectedStage: "upscale",

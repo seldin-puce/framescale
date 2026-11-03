@@ -93,6 +93,24 @@ fn main() {
                 2,
             ),
             (
+                "Real-CUGAN SE denoise  720×576",
+                StageConfig::Denoise {
+                    model: m("realcugan-se"),
+                    strength: 2,
+                },
+                (720, 576),
+                6,
+            ),
+            (
+                "Real-CUGAN SE denoise 1920×1080",
+                StageConfig::Denoise {
+                    model: m("realcugan-se"),
+                    strength: 2,
+                },
+                (1920, 1080),
+                3,
+            ),
+            (
                 "RIFE v4.6           1920×1080",
                 StageConfig::Interpolate {
                     model: m("rife-v4.6"),

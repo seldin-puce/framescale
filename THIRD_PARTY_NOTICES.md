@@ -35,7 +35,11 @@ own licenses apply to those components. This file ships inside the application b
 | Real-ESRGAN (x4plus, x4plus-anime, animevideov3) | BSD-3-Clause | https://github.com/xinntao/Real-ESRGAN |
 | Real-CUGAN (se, pro) | MIT | https://github.com/bilibili/ailab / nihui/realcugan-ncnn-vulkan |
 | RIFE v4.6 | MIT | https://github.com/hzwer/ECCV2022-RIFE / nihui/rife-ncnn-vulkan |
+| YuNet face detector (2023mar), ncnn conversion | MIT, © 2020 Shiqi Yu | https://github.com/opencv/opencv_zoo / huggingface.co/lightcella/face-pipeline-ncnn |
 
 Models such as CodeFormer are **not** distributed with FrameScale AI. Users
 who choose to load them (Bring-Your-Own-Model) do so under those models' own
-license terms.
+license terms. CodeFormer's weights are under the S-Lab License 1.0
+(non-commercial use only); Face Fix loads the ncnn conversion
+(github.com/FeiGeChuanShu/CodeFormer-ncnn, `models/` folder) from a folder the
+user chooses.

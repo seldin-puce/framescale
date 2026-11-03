@@ -2,6 +2,7 @@
 #include "fs-engine/src/ncnn.rs.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -141,6 +142,142 @@ void Model::load(rust::Str param, rust::Str bin) {
     if (r != 0) fail(("load_param " + p).c_str(), r);
     r = net_->load_model(b.c_str());
     if (r != 0) fail(("load_model " + b).c_str(), r);
+    index_gaps();
+}
+
+void Model::load_text(rust::Str param_text, rust::Str bin) {
+    std::string p(param_text.data(), param_text.size()), b(bin.data(), bin.size());
+    int r = net_->load_param_mem(p.c_str());
+    if (r != 0) fail("load_param (text)", r);
+    r = net_->load_model(b.c_str());
+    if (r != 0) fail(("load_model " + b).c_str(), r);
+    index_gaps();
+}
+
+void Model::index_gaps() {
+    // Real-CUGAN marks its SE global-average outputs `gap<N>`.
+    std::vector<std::pair<int, std::string>> found;
+    for (const ncnn::Blob& blob : net_->blobs()) {
+        const std::string& n = blob.name;
+        if (n.size() > 3 && n.compare(0, 3, "gap") == 0 &&
+            std::all_of(n.begin() + 3, n.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; }))
+            found.emplace_back(std::stoi(n.substr(3)), n);
+    }
+    std::sort(found.begin(), found.end());
+    gaps_.clear();
+    for (auto& f : found) gaps_.push_back(f.second);
+}
+
+rust::Vec<float> Model::cugan_stats(rust::Slice<const float> input, int32_t w, int32_t h,
+                                    rust::Vec<int32_t>& lens) const {
+    if (input.size() != (size_t)w * h * 3) throw std::runtime_error("cugan_stats: buffer size mismatch");
+    if (gaps_.empty()) throw std::runtime_error("cugan_stats: model has no SE statistics (gap*) blobs");
+    ncnn::Extractor ex = net_->create_extractor();
+    int r = ex.input("in0", wrap_planar(input.data(), w, h, 3));
+    if (r != 0) fail("input", r);
+    rust::Vec<float> out;
+    lens.clear();
+    for (const std::string& g : gaps_) {
+        ncnn::Mat m;
+        r = ex.extract(g.c_str(), m);
+        if (r != 0) fail(("extract " + g).c_str(), r);
+        if (m.dims != 1)
+            throw std::runtime_error("cugan_stats: " + g + " has " + std::to_string(m.dims) + " dims, expected 1");
+        const float* p = static_cast<const float*>(m.data);
+        for (int i = 0; i < m.w; i++) out.push_back(p[i]);
+        lens.push_back(m.w);
+    }
+    return out;
+}
+
+rust::Vec<float> Model::run_outputs(rust::Slice<const float> input, int32_t w, int32_t h,
+                                    rust::Vec<int32_t>& shapes) const {
+    if (input.size() != (size_t)w * h * 3) throw std::runtime_error("run_outputs: buffer size mismatch");
+    ncnn::Extractor ex = net_->create_extractor();
+    int r = ex.input("in0", wrap_planar(input.data(), w, h, 3));
+    if (r != 0) fail("input", r);
+    rust::Vec<float> out;
+    shapes.clear();
+    const std::vector<ncnn::Blob>& blobs = net_->blobs();
+    for (int i = 0;; i++) {
+        const std::string name = "out" + std::to_string(i);
+        int index = -1;
+        for (size_t b = 0; b < blobs.size(); b++)
+            if (blobs[b].name == name) {
+                index = (int)b;
+                break;
+            }
+        if (index < 0) break;
+        ncnn::Mat m;
+        r = ex.extract(index, m);
+        if (r != 0) fail(("extract " + name).c_str(), r);
+        for (int q = 0; q < m.c; q++) {
+            const float* p = m.channel(q);
+            for (int k = 0; k < m.w * m.h; k++) out.push_back(p[k]);
+        }
+        shapes.push_back(m.w);
+        shapes.push_back(m.h);
+        shapes.push_back(m.c);
+    }
+    if (shapes.empty()) throw std::runtime_error("run_outputs: model has no out0 blob");
+    return out;
+}
+
+void Model::run_codeformer(const Model& generator, rust::Slice<const float> input,
+                           rust::Slice<float> output) const {
+    const int S = 512;
+    if (input.size() != (size_t)S * S * 3 || output.size() != (size_t)S * S * 3)
+        throw std::runtime_error("run_codeformer: buffer size mismatch");
+    static const char* feats[4] = {"enc_feat_32", "enc_feat_64", "enc_feat_128", "enc_feat_256"};
+    ncnn::Extractor enc = net_->create_extractor();
+    int r = enc.input("input", wrap_planar(input.data(), S, S, 3));
+    if (r != 0) fail("encoder input", r);
+    ncnn::Mat f[4], lq, probs;
+    for (int i = 0; i < 4 && r == 0; i++) r = enc.extract(feats[i], f[i]);
+    if (r == 0) r = enc.extract("lq_feat", lq);
+    if (r == 0) r = enc.extract("soft_one_hot", probs);
+    if (r != 0) fail("encoder extract", r);
+    if (probs.dims != 2) throw std::runtime_error("run_codeformer: unexpected code logits shape");
+    // Each token takes its most likely codebook entry (one-hot rows).
+    ncnn::Mat onehot(probs.w, probs.h);
+    onehot.fill(0.f);
+    for (int y = 0; y < probs.h; y++) {
+        const float* row = probs.row(y);
+        onehot.row(y)[std::max_element(row, row + probs.w) - row] = 1.f;
+    }
+    ncnn::Extractor gen = generator.net_->create_extractor();
+    for (int i = 0; i < 4 && r == 0; i++) r = gen.input(feats[i], f[i]);
+    if (r == 0) r = gen.input("style_feat", lq);
+    if (r == 0) r = gen.input("input", onehot);
+    if (r != 0) fail("generator input", r);
+    if (generator.net_->output_indexes().empty()) throw std::runtime_error("run_codeformer: generator has no output");
+    ncnn::Mat out;
+    r = gen.extract(generator.net_->output_indexes()[0], out);
+    if (r != 0) fail("generator extract", r);
+    unwrap_planar(out, output.data(), S, S, 3);
+}
+
+void Model::run_cugan(rust::Slice<const float> input, int32_t w, int32_t h, rust::Slice<const float> gaps,
+                      rust::Slice<const int32_t> lens, rust::Slice<float> output, int32_t out_w,
+                      int32_t out_h) const {
+    if (input.size() != (size_t)w * h * 3 || output.size() != (size_t)out_w * out_h * 3)
+        throw std::runtime_error("run_cugan: buffer size mismatch");
+    if (lens.size() != gaps_.size()) throw std::runtime_error("run_cugan: SE statistics don't match the model");
+    ncnn::Extractor ex = net_->create_extractor();
+    int r = ex.input("in0", wrap_planar(input.data(), w, h, 3));
+    size_t off = 0;
+    for (size_t i = 0; i < gaps_.size() && r == 0; i++) {
+        if (lens[i] <= 0 || off + (size_t)lens[i] > gaps.size()) throw std::runtime_error("run_cugan: bad SE statistics");
+        ncnn::Mat g(lens[i]);
+        std::memcpy(g.data, gaps.data() + off, sizeof(float) * (size_t)lens[i]);
+        off += (size_t)lens[i];
+        r = ex.input(gaps_[i].c_str(), g);  // replaces the tile-local global pooling
+    }
+    if (r != 0) fail("input", r);
+    ncnn::Mat out;
+    r = ex.extract("out0", out);
+    if (r != 0) fail("extract", r);
+    unwrap_planar(out, output.data(), out_w, out_h, 3);
 }
 
 void Model::run_sr(rust::Slice<const float> input, int32_t w, int32_t h, rust::Slice<float> output,

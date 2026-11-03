@@ -1,9 +1,9 @@
 //! ncnn backend: Vulkan inference on every platform (MoltenVK on macOS), or
 //! ncnn's CPU path when no usable GPU exists.
 //!
-//! Supported stages: Upscale (Real-ESRGAN family) and Interpolate (RIFE v4.6).
-//! Denoise (Real-CUGAN) and Face Fix (BYOM) are rejected up front with a clear
-//! error rather than silently skipped.
+//! Supported stages: Denoise (Real-CUGAN), Upscale (Real-ESRGAN family), Face
+//! Fix (YuNet detection + the user's own CodeFormer-ncnn) and Interpolate
+//! (RIFE v4.6). Anything else is rejected up front, never silently skipped.
 #![allow(unsafe_code)] // cxx bridge
 
 use std::path::{Path, PathBuf};
@@ -12,7 +12,8 @@ use cxx::UniquePtr;
 use fs_types::pipeline::StageConfig;
 use fs_types::worker::EnginePlan;
 
-use crate::planar::{self, Planar};
+use crate::face;
+use crate::planar::{self, Planar, Rect};
 use crate::{EngineError, Frame, InferenceBackend};
 
 #[cxx::bridge(namespace = "fsncnn")]
@@ -37,6 +38,20 @@ mod ffi {
         fn gpu_list() -> Vec<GpuEntry>;
         fn model_new(gpu: i32, fp16: bool, threads: i32) -> Result<UniquePtr<Model>>;
         fn load(self: Pin<&mut Model>, param: &str, bin: &str) -> Result<()>;
+        fn load_text(self: Pin<&mut Model>, param_text: &str, bin: &str) -> Result<()>;
+        fn run_outputs(
+            self: &Model,
+            input: &[f32],
+            w: i32,
+            h: i32,
+            shapes: &mut Vec<i32>,
+        ) -> Result<Vec<f32>>;
+        fn run_codeformer(
+            self: &Model,
+            generator: &Model,
+            input: &[f32],
+            output: &mut [f32],
+        ) -> Result<()>;
         fn run_sr(
             self: &Model,
             input: &[f32],
@@ -54,6 +69,25 @@ mod ffi {
             h: i32,
             t: f32,
             output: &mut [f32],
+        ) -> Result<()>;
+        fn cugan_stats(
+            self: &Model,
+            input: &[f32],
+            w: i32,
+            h: i32,
+            lens: &mut Vec<i32>,
+        ) -> Result<Vec<f32>>;
+        #[allow(clippy::too_many_arguments)]
+        fn run_cugan(
+            self: &Model,
+            input: &[f32],
+            w: i32,
+            h: i32,
+            gaps: &[f32],
+            lens: &[i32],
+            output: &mut [f32],
+            out_w: i32,
+            out_h: i32,
         ) -> Result<()>;
     }
 }
@@ -105,7 +139,221 @@ struct Sr {
     target: usize,
 }
 
+/// Context Real-CUGAN ×2 consumes on each side (valid convolutions:
+/// input w + 36 → output 2w), from the reference implementation.
+const CUGAN_PAD: usize = 18;
+/// The SE statistics pass runs on the whole frame, downscaled to about this
+/// many pixels ("very rough" sync in realcugan-ncnn-vulkan, its default).
+const CUGAN_STATS_AREA: f64 = 512.0 * 512.0;
+
+/// Denoise stage: Real-CUGAN ×2 at the chosen denoise level, then an exact
+/// area downscale back to the input size. (The ncnn Pro models take and give
+/// plain 0–1 RGB like SE; measured, no extra normalization.)
+struct Cugan {
+    model: UniquePtr<ffi::Model>,
+}
+
+impl Cugan {
+    /// SE statistics of the whole frame (from a downscaled copy).
+    fn stats(&self, img: &Planar) -> Result<(Vec<f32>, Vec<i32>), EngineError> {
+        let f = ((img.w * img.h) as f64 / CUGAN_STATS_AREA).sqrt().max(1.0);
+        let even = |v: f64| ((v / 2.0).round() as usize).max(1) * 2;
+        let (sw, sh) = (
+            even(img.w as f64 / f).min(img.w + img.w % 2),
+            even(img.h as f64 / f).min(img.h + img.h % 2),
+        );
+        let small = if sw < img.w && sh < img.h {
+            planar::area_resample(img, sw, sh)
+        } else {
+            img.region(0, 0, sw, sh)
+        };
+        let p = CUGAN_PAD as isize;
+        let input = small.region(-p, -p, small.w + 2 * CUGAN_PAD, small.h + 2 * CUGAN_PAD);
+        let mut lens = Vec::new();
+        let gaps = self
+            .model
+            .cugan_stats(&input.data, input.w as i32, input.h as i32, &mut lens)
+            .map_err(|e| map_err(&e, 0))?;
+        Ok((gaps, lens))
+    }
+
+    /// One padded tile (`(w + 36) × (h + 36)`) → `2·(w + 36) × 2·(h + 36)`
+    /// as `tiled_into` expects; only the interior (the network output) is used.
+    fn tile(
+        &self,
+        t: &Planar,
+        gaps: &[f32],
+        lens: &[i32],
+        tile: u32,
+    ) -> Result<Planar, EngineError> {
+        let (w, h) = (t.w - 2 * CUGAN_PAD, t.h - 2 * CUGAN_PAD);
+        // The network needs even sizes: extend by one replicated column/row.
+        let (ew, eh) = (w + w % 2, h + h % 2);
+        let owned;
+        let input = if (ew, eh) == (w, h) {
+            t
+        } else {
+            owned = t.region(0, 0, ew + 2 * CUGAN_PAD, eh + 2 * CUGAN_PAD);
+            &owned
+        };
+        let mut net = Planar::zeros(ew * 2, eh * 2);
+        self.model
+            .run_cugan(
+                &input.data,
+                input.w as i32,
+                input.h as i32,
+                gaps,
+                lens,
+                &mut net.data,
+                net.w as i32,
+                net.h as i32,
+            )
+            .map_err(|e| map_err(&e, tile))?;
+        let mut out = Planar::zeros(t.w * 2, t.h * 2);
+        let r = Rect {
+            x: 0,
+            y: 0,
+            w: w * 2,
+            h: h * 2,
+        };
+        out.blit(&net, r, CUGAN_PAD * 2, CUGAN_PAD * 2);
+        Ok(out)
+    }
+
+    fn denoise(
+        &self,
+        img: &Planar,
+        tile: u32,
+        workers: usize,
+        scratch: &mut Planar,
+    ) -> Result<Planar, EngineError> {
+        let (gaps, lens) = self.stats(img)?;
+        planar::tiled_into(img, tile as usize, CUGAN_PAD, 2, workers, scratch, |t| {
+            self.tile(t, &gaps, &lens, tile)
+        })?;
+        Ok(planar::area_resample(scratch, img.w, img.h))
+    }
+}
+
+/// Faces narrower than this (output pixels) are left alone: restoring them
+/// would mostly invent detail.
+const MIN_FACE: f32 = 24.0;
+/// Bound the per-frame cost on crowd shots.
+const MAX_FACES: usize = 12;
+/// YuNet confidence needed to restore a face.
+const FACE_SCORE: f32 = 0.7;
+
+/// Face Fix: YuNet finds faces and landmarks; each face is aligned to the
+/// FFHQ template, restored by CodeFormer and feathered back in.
+struct FaceFix {
+    detector: UniquePtr<ffi::Model>,
+    encoder: UniquePtr<ffi::Model>,
+    generator: UniquePtr<ffi::Model>,
+}
+
+impl FaceFix {
+    fn load(
+        models: &Path,
+        dir: &Path,
+        fidelity: f32,
+        device: &DeviceSel,
+        threads: i32,
+    ) -> Result<Self, EngineError> {
+        let yunet = models.join("yunet");
+        let detector = load(
+            device,
+            threads,
+            &yunet.join("yunet_2023mar.ncnn.param"),
+            &yunet.join("yunet_2023mar.ncnn.bin"),
+        )?;
+        let encoder = load(
+            device,
+            threads,
+            &dir.join("encoder.param"),
+            &dir.join("encoder.bin"),
+        )?;
+        let gen_param = dir.join("generator.param");
+        let gen_bin = dir.join("generator.bin");
+        if !gen_bin.exists() {
+            return Err(EngineError::ModelNotFound(gen_bin.display().to_string()));
+        }
+        let text = std::fs::read_to_string(&gen_param)
+            .map_err(|e| EngineError::ModelNotFound(format!("{}: {e}", gen_param.display())))?;
+        let (text, fused) = face::with_fidelity(&text, fidelity.clamp(0.0, 1.0));
+        if fused == 0 {
+            tracing::warn!("CodeFormer generator has no fuse blocks; fidelity setting ignored");
+        }
+        let mut generator =
+            ffi::model_new(device.index, device.index >= 0, threads).map_err(|e| map_err(&e, 0))?;
+        generator
+            .pin_mut()
+            .load_text(&text, &gen_bin.to_string_lossy())
+            .map_err(|e| EngineError::ModelNotFound(e.what().to_owned()))?;
+        Ok(Self {
+            detector,
+            encoder,
+            generator,
+        })
+    }
+
+    /// Detect and restore faces in place. Returns how many were restored.
+    fn fix(&self, img: &mut Planar) -> Result<usize, EngineError> {
+        let (input, scale) = face::letterbox_bgr(img);
+        let mut shapes = Vec::new();
+        let data = self
+            .detector
+            .run_outputs(&input.data, input.w as i32, input.h as i32, &mut shapes)
+            .map_err(|e| map_err(&e, 0))?;
+        let mut heads = Vec::new();
+        let mut off = 0;
+        for &[w, h, c] in shapes.as_chunks::<3>().0 {
+            let (w, h, c) = (w as usize, h as usize, c as usize);
+            let n = w * h * c;
+            heads.push(face::Head {
+                data: &data[off..off + n],
+                w,
+                h,
+                c,
+            });
+            off += n;
+        }
+        let faces = face::decode_yunet(&heads, FACE_SCORE);
+        let mut restored = 0;
+        for f in faces
+            .iter()
+            .map(|f| f.scaled(scale))
+            .filter(|f| f.bbox[2] >= MIN_FACE)
+            .take(MAX_FACES)
+        {
+            let Some(to_face) = face::similarity(&f.kps, &face::TEMPLATE) else {
+                continue;
+            };
+            let Some(to_img) = to_face.invert() else {
+                continue;
+            };
+            let crop = face::warp(img, &to_img, face::FACE, face::FACE);
+            let input: Vec<f32> = crop.data.iter().map(|v| v * 2.0 - 1.0).collect();
+            let mut out = Planar::zeros(face::FACE, face::FACE);
+            self.encoder
+                .run_codeformer(&self.generator, &input, &mut out.data)
+                .map_err(|e| map_err(&e, 0))?;
+            for v in &mut out.data {
+                *v = (v.clamp(-1.0, 1.0) + 1.0) * 0.5;
+            }
+            face::paste(img, &out, &to_face);
+            restored += 1;
+        }
+        Ok(restored)
+    }
+}
+
 pub struct NcnnBackend {
+    denoise: Option<Cugan>,
+    face: Option<FaceFix>,
+    /// Faces restored in the last processed frame.
+    faces: usize,
+    /// Reused Real-CUGAN ×2 buffer.
+    dn_scratch: Planar,
     sr: Option<Sr>,
     /// Reused SR output buffer (resized on demand).
     scratch: Planar,
@@ -132,6 +380,34 @@ fn map_err(e: &cxx::Exception, tile: u32) -> EngineError {
     } else {
         EngineError::Internal(m.to_owned())
     }
+}
+
+/// `(param, bin)` for a Real-CUGAN denoise model at a strength 0–3:
+/// 0 conservative (restore, keep grain), 1–3 denoise1x…3x. Pro only ships
+/// conservative and denoise3x, so 1 → conservative and 2 → denoise3x.
+fn resolve_cugan(models: &Path, id: &str, strength: u8) -> Result<(PathBuf, PathBuf), EngineError> {
+    let pro = match id {
+        "realcugan-se" => false,
+        "realcugan-pro" => true,
+        other => {
+            return Err(EngineError::ModelNotFound(format!(
+                "unknown denoise model '{other}'"
+            )));
+        }
+    };
+    let variant = match (pro, strength) {
+        (false, 0) | (true, 0 | 1) => "up2x-conservative",
+        (false, 1) => "up2x-denoise1x",
+        (false, 2) => "up2x-denoise2x",
+        _ => "up2x-denoise3x",
+    };
+    let dir = models
+        .join("realcugan")
+        .join(if pro { "models-pro" } else { "models-se" });
+    Ok((
+        dir.join(format!("{variant}.param")),
+        dir.join(format!("{variant}.bin")),
+    ))
 }
 
 /// `(param, bin, native_scale)` for an upscale model id at a requested scale.
@@ -180,20 +456,37 @@ impl NcnnBackend {
     pub fn new(plan: &EnginePlan, device: DeviceSel, threads: i32) -> Result<Self, EngineError> {
         let models = Path::new(&plan.models_dir);
         let mut sr = None;
+        let mut denoise = None;
+        let mut face_fix = None;
         let mut rife = None;
         let mut heavy = false;
         for stage in &plan.stages {
             match stage {
                 StageConfig::Deinterlace { .. } => {} // handled by FFmpeg in the decoder
-                StageConfig::Denoise { .. } => {
-                    return Err(EngineError::Unsupported(
-                        "Denoise (Real-CUGAN) is not available in this build yet".into(),
-                    ));
+                StageConfig::Denoise { model, strength } => {
+                    if model.path.is_some() {
+                        return Err(EngineError::Unsupported(
+                            "custom denoise models are not supported yet".into(),
+                        ));
+                    }
+                    let (param, bin) = resolve_cugan(models, &model.id, *strength)?;
+                    denoise = Some(Cugan {
+                        model: load(&device, threads, &param, &bin)?,
+                    });
                 }
-                StageConfig::FaceFix { .. } => {
-                    return Err(EngineError::Unsupported(
-                        "Face Fix (bring-your-own model) is not available in this build yet".into(),
-                    ));
+                StageConfig::FaceFix { model, fidelity } => {
+                    let Some(dir) = model.path.as_deref() else {
+                        return Err(EngineError::ModelNotFound(
+                            "Face Fix needs your CodeFormer model folder".into(),
+                        ));
+                    };
+                    face_fix = Some(FaceFix::load(
+                        models,
+                        Path::new(dir),
+                        *fidelity,
+                        &device,
+                        threads,
+                    )?);
                 }
                 StageConfig::Upscale { model, scale } => {
                     if model.path.is_some() {
@@ -240,6 +533,10 @@ impl NcnnBackend {
             (true, false, _) => 192,
         };
         Ok(Self {
+            denoise,
+            face: face_fix,
+            faces: 0,
+            dn_scratch: Planar::zeros(1, 1),
             sr,
             scratch: Planar::zeros(1, 1),
             gpu: device.index >= 0,
@@ -247,6 +544,13 @@ impl NcnnBackend {
             device_name: device.name,
             max_tile,
         })
+    }
+}
+
+impl NcnnBackend {
+    /// Faces restored in the last frame (Face Fix).
+    pub fn last_faces(&self) -> usize {
+        self.faces
     }
 }
 
@@ -264,14 +568,23 @@ impl InferenceBackend for NcnnBackend {
     }
 
     fn process(&mut self, input: &Frame, tile: u32) -> Result<Frame, EngineError> {
-        let Some(sr) = self.sr.as_ref() else {
+        if self.denoise.is_none() && self.sr.is_none() && self.face.is_none() {
             return Ok(input.clone());
-        };
-        let img = planar::from_frame(input);
-        let (native, model) = (sr.native, &sr.model);
+        }
         // Two in-flight tiles keep the GPU busy while the CPU slices/stitches;
         // the output buffer is reused across frames (no 100 MB page-faulting).
         let workers = if self.gpu { 2 } else { 1 };
+        let mut img = planar::from_frame(input);
+        if let Some(dn) = self.denoise.as_ref() {
+            img = dn.denoise(&img, tile, workers, &mut self.dn_scratch)?;
+        }
+        let Some(sr) = self.sr.as_ref() else {
+            if let Some(ff) = self.face.as_ref() {
+                self.faces = ff.fix(&mut img)?;
+            }
+            return Ok(planar::to_frame(&img, input.format));
+        };
+        let (native, model) = (sr.native, &sr.model);
         planar::tiled_into(
             &img,
             tile as usize,
@@ -294,13 +607,19 @@ impl InferenceBackend for NcnnBackend {
                 Ok(o)
             },
         )?;
+        // Face Fix works on the final (upscaled) pixels.
         let frame = if sr.target == native {
+            if let Some(ff) = self.face.as_ref() {
+                self.faces = ff.fix(&mut self.scratch)?;
+            }
             planar::to_frame(&self.scratch, input.format)
         } else {
-            planar::to_frame(
-                &planar::area_resample(&self.scratch, img.w * sr.target, img.h * sr.target),
-                input.format,
-            )
+            let mut out =
+                planar::area_resample(&self.scratch, img.w * sr.target, img.h * sr.target);
+            if let Some(ff) = self.face.as_ref() {
+                self.faces = ff.fix(&mut out)?;
+            }
+            planar::to_frame(&out, input.format)
         };
         Ok(frame)
     }

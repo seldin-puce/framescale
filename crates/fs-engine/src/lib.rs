@@ -18,6 +18,7 @@
 #![deny(unsafe_code)]
 
 pub mod cpu;
+pub mod face;
 pub mod frame;
 pub mod interp;
 #[cfg(feature = "ncnn")]

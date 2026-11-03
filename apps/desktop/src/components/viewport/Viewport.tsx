@@ -107,7 +107,8 @@ export function Viewport() {
   const showingPreview = !finished && player.pair != null;
 
   const unsupported = STAGE_ORDER.filter((k) => stages[k].enabled && COMING_SOON.has(k));
-  const canRender = backend.kind === "tauri" && !!info && unsupported.length === 0;
+  const needsFaceModel = stages.faceFix.enabled && !stages.faceFix.modelPath;
+  const canRender = backend.kind === "tauri" && !!info && unsupported.length === 0 && !needsFaceModel;
   const renderHint =
     backend.kind !== "tauri"
       ? "Previews run the real engine: open FrameScale as the desktop app."
@@ -115,7 +116,9 @@ export function Viewport() {
         ? "Select a clip to preview."
         : unsupported.length
           ? "Turn off stages marked Soon to preview."
-          : "Run your exact pipeline on the GPU for 2 s from the marker.";
+          : needsFaceModel
+            ? "Face Fix needs your CodeFormer model folder (see the Face Fix stage)."
+            : "Run your exact pipeline on the GPU for 2 s from the marker.";
 
   const request = (z: number) => setZoomReq((q) => ({ zoom: z, seq: (q?.seq ?? 0) + 1 }));
 

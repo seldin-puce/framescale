@@ -243,6 +243,7 @@ export function createDemoBackend(): Backend {
       return fail("demo", "Comparing finished renders needs the desktop app.");
     },
     async compareClose() {},
+    async checkFaceModel() {},
     async pickFolder() {
       return "/Users/demo/Movies/FrameScale";
     },

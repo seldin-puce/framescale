@@ -120,6 +120,29 @@ async fn preview_and_thumbnail() {
     assert!(h.tone_mapped);
     assert_eq!(h.after_frames, h.before_frames);
 
+    // Denoise (Real-CUGAN) runs at the input size, chained before Upscale.
+    let dn = PipelineSpec {
+        stages: vec![
+            StageConfig::Denoise {
+                model: m("realcugan-se"),
+                strength: 2,
+            },
+            StageConfig::Upscale {
+                model: m("realesr-animevideov3"),
+                scale: 2,
+            },
+        ],
+    };
+    let d = preview::render(&tools, &sdr, 1.0, 0.5, &dn, &root)
+        .await
+        .expect("denoise preview");
+    assert_eq!(
+        (d.width, d.height),
+        (640, 360),
+        "denoise keeps size, upscale ×2"
+    );
+    assert_eq!(d.after_frames, d.before_frames);
+
     // A single-frame "still" (shown first while the full 2 s renders).
     let still = preview::render(&tools, &sdr, 3.0, 0.0, &up, &root)
         .await
