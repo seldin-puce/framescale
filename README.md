@@ -146,7 +146,9 @@ Pick the file for your system:
 | Linux, Fedora / openSUSE | `…x86_64.rpm` |
 
 Each release also carries `ffmpeg-gpl-sources.tar`, the source code of the
-bundled FFmpeg (a GPL requirement). You don't need it to run the app.
+bundled FFmpeg (a GPL requirement). You don't need it to run the app. How
+releases are built and signed, and what the app sends over the network
+(nothing, unless you ask): [code signing policy](https://framescale.org/code-signing-policy/).
 
 **First run**
 

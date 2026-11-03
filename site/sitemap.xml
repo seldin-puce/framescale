@@ -20,4 +20,10 @@
     <loc>https://framescale.org/topaz-video-ai-alternative/</loc>
     <lastmod>2026-11-03</lastmod>
   </url>
+  <url>
+    <loc>https://framescale.org/code-signing-policy/</loc>
+    <lastmod>2026-11-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
 </urlset>

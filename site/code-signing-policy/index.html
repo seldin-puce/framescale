@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code signing policy | FrameScale AI</title>
+<meta name="description" content="How FrameScale AI's releases are built and signed, who approves them, and what the app sends over the network (nothing, unless you ask).">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://framescale.org/code-signing-policy/">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0f19">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="FrameScale AI home"><img src="/icon.svg" alt="" width="28" height="28">FrameScale AI</a>
+    <nav>
+      <a class="opt" href="/#features">Features</a>
+      <a class="opt" href="/#guides">Guides</a>
+      <a href="/#download">Download</a>
+      <a href="https://github.com/seldin-puce/framescale">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main>
+<article class="guide">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">FrameScale AI</a> › Code signing policy</nav>
+<h1>Code signing policy</h1>
+<p>FrameScale AI is free, open-source software (GPL-3.0-or-later). This page explains how its release files are built and signed, who decides what gets signed, and what the app sends over the network.</p>
+
+<h2>Signing status</h2>
+<ul>
+<li><strong>Windows:</strong> free code signing through the <a href="https://signpath.org">SignPath Foundation</a> (for open-source projects) is being set up. Until it's in place, the Windows installer is unsigned, and SmartScreen asks you to confirm it (<em>More info → Run anyway</em>).</li>
+<li><strong>macOS:</strong> ad-hoc signed and not notarized (notarization needs a paid Apple developer account). Install it with <code>curl -fsSL https://framescale.org/install.sh | bash</code>, or see the <a href="https://github.com/seldin-puce/framescale#download">README</a>.</li>
+<li><strong>Linux:</strong> the AppImage, .deb and .rpm are not signed.</li>
+</ul>
+
+<h2>What gets signed</h2>
+<p>Only files built from this project's own source code, by the automated release build:</p>
+<ul>
+<li>the Windows installer (<code>FrameScale AI_&lt;version&gt;_x64-setup.exe</code>);</li>
+<li>the programs it installs: <code>FrameScale AI.exe</code> and its worker process <code>fs-worker.exe</code>.</li>
+</ul>
+<p>The installer also contains open-source programs and data built by their own projects, which stay as their authors published them: FFmpeg (<a href="https://github.com/BtbN/FFmpeg-Builds">BtbN's builds</a>, GPL) and the AI models listed in the <a href="https://github.com/seldin-puce/framescale/blob/main/THIRD_PARTY_NOTICES.md">third-party notices</a>, each pinned by URL and SHA-256. Everything in the installer is under an OSI-approved open-source license. The one model that isn't (CodeFormer, used by Face Fix, non-commercial license) is not in the installer: the app downloads it only if you turn Face Fix on and agree to its license.</p>
+
+<h2>How releases are built</h2>
+<ul>
+<li>Every release is built by <a href="https://github.com/seldin-puce/framescale/blob/main/.github/workflows/release.yml">GitHub Actions</a> from a tagged commit of the <a href="https://github.com/seldin-puce/framescale">public repository</a>. Nothing built on a personal computer is signed.</li>
+<li>Third-party downloads used by the build are pinned by URL and SHA-256 in <a href="https://github.com/seldin-puce/framescale/blob/main/third_party/manifest.toml">third_party/manifest.toml</a>.</li>
+<li>Build scripts and workflow files are part of the source code and reviewed like it.</li>
+<li>Each release is approved by hand before it is signed and published.</li>
+</ul>
+
+<h2>Team roles</h2>
+<p>FrameScale AI currently has one maintainer, who holds every role. All members use multi-factor authentication for GitHub and SignPath.</p>
+<ul>
+<li><strong>Committers and reviewers:</strong> <a href="https://github.com/seldin-puce">seldin-puce</a> (maintainer). Outside contributions arrive as pull requests and are reviewed before merging.</li>
+<li><strong>Approvers</strong> (approve each signing request): <a href="https://github.com/seldin-puce">seldin-puce</a>.</li>
+</ul>
+
+<h2>Privacy policy</h2>
+<p><strong>FrameScale AI will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.</strong></p>
+<ul>
+<li>Your videos are processed entirely on your own computer. Nothing is uploaded.</li>
+<li>There is no telemetry, analytics, crash reporting, advertising or account.</li>
+<li>The app connects to the internet only when you ask it to: when you turn Face Fix on and choose to download the CodeFormer model, it is downloaded from GitHub (<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a> applies to that request).</li>
+<li>Links you click (GitHub, Ko-fi) open in your web browser.</li>
+<li>The one-line macOS installer downloads the latest release from GitHub when you run it.</li>
+</ul>
+<p>To uninstall: on Windows, use <em>Settings → Apps</em>; on macOS, move <em>FrameScale AI</em> from Applications to the Bin; on Linux, remove the package or delete the AppImage.</p>
+
+<h2>Questions or problems</h2>
+<p>Report anything that looks wrong with a release or its signature in the <a href="https://github.com/seldin-puce/framescale/issues">issue tracker</a>.</p>
+</article>
+</main>
+<footer>
+  <div class="wrap">
+    <span>© 2026 FrameScale AI contributors · GPL-3.0-or-later</span>
+    <nav>
+      <a href="/">Home</a>
+      <a href="https://github.com/seldin-puce/framescale">GitHub</a>
+      <a href="https://github.com/seldin-puce/framescale/releases">Releases</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

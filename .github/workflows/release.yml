@@ -163,7 +163,7 @@ jobs:
 
             **Windows:** the installer isn't code-signed yet. If SmartScreen says "Windows protected your PC", click *More info → Run anyway*.
 
-            More in the [README](https://github.com/seldin-puce/framescale#download). GPL: the corresponding source of the bundled FFmpeg is attached as `ffmpeg-gpl-sources.tar`.
+            More in the [README](https://github.com/seldin-puce/framescale#download) and the [code signing policy](https://framescale.org/code-signing-policy/). GPL: the corresponding source of the bundled FFmpeg is attached as `ffmpeg-gpl-sources.tar`.
           releaseDraft: true
           includeUpdaterJson: ${{ env.FS_UPDATER == 'true' }}
 
