@@ -173,3 +173,71 @@ url     = "https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/
 sha256 = "1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68"
 select  = ["rife-v4.6/"]
 dest    = "rife"
+
+# Newer RIFE (Practical-RIFE 4.22 lite / 4.25 / 4.26, hzwer, MIT), ncnn
+# conversions from TNTwise/rife-ncnn-vulkan (MIT fork of nihui's). Same
+# inputs and custom rife.Warp layer as 4.6; 4.25 and 4.26 need frames padded
+# to a multiple of 64.
+[[models]]
+id      = "rife-v4.25"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.25/flownet.param"
+sha256  = "6ba231fb00e4ae82b120f938d9b2df91db32fbf322bd110f29450efaf61848d6"
+file    = "flownet.param"
+dest    = "rife/rife-v4.25"
+
+[[models]]
+id      = "rife-v4.25"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.25/flownet.bin"
+sha256  = "10de487a095e61cb2971c39e3b5e17005a70fba6201c77fb96e063f4423b583f"
+file    = "flownet.bin"
+dest    = "rife/rife-v4.25"
+
+[[models]]
+id      = "rife-v4.26"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.26/flownet.param"
+sha256  = "79f16c28903f93f8308f0c4c947f8c7e0c17d99a57b85473e5f298dd578d137b"
+file    = "flownet.param"
+dest    = "rife/rife-v4.26"
+
+[[models]]
+id      = "rife-v4.26"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.26/flownet.bin"
+sha256  = "94d58e30b75d7c7609cfa6f3bdad524deddd14f5f75e85c36d2f827ef5c64731"
+file    = "flownet.bin"
+dest    = "rife/rife-v4.26"
+
+[[models]]
+id      = "rife-v4.22-lite"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.22-lite/flownet.param"
+sha256  = "091119e19a5891a5477de8f90b3c9e979baece5ee57c27d4e4138a6cc2552cc3"
+file    = "flownet.param"
+dest    = "rife/rife-v4.22-lite"
+
+[[models]]
+id      = "rife-v4.22-lite"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/models/rife-v4.22-lite/flownet.bin"
+sha256  = "792da5d62937199886bf8bb781ab8e0eddf663854d57e4a43cd7b32e4e81b29b"
+file    = "flownet.bin"
+dest    = "rife/rife-v4.22-lite"
+
+[[models]]
+id      = "rife"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/TNTwise/rife-ncnn-vulkan/13338e38debe2e400b3eeecf6792312d01a692f9/LICENSE"
+sha256  = "a73beab18143600af0b10c6050a953ec233775ce31c2bf3373a794db535329fd"
+file    = "LICENSE"
+dest    = "rife"
+
+[[models]]
+id      = "rife"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/hzwer/Practical-RIFE/bbfd2ea90910789a860ea3e2b32a240cd577b75e/LICENSE"
+sha256  = "7932fb49341512b959b1744a6d9cbb39e5a1ec89da438a34d0454d5d8df9fecd"
+file    = "LICENSE-RIFE"
+dest    = "rife"

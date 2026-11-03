@@ -27,6 +27,7 @@ own licenses apply to those components. This file ships inside the application b
 | MoltenVK (macOS) | 1.4.2 | Apache-2.0 |
 | Tauri and its plugins | 2.x | Apache-2.0 OR MIT |
 | SQLite (via rusqlite, bundled) | — | Public Domain |
+| `rife.Warp` Vulkan shader (adapted, in fs-engine) | — | MIT, © 2020 nihui (rife-ncnn-vulkan) |
 
 ## Bundled AI models
 
@@ -34,7 +35,7 @@ own licenses apply to those components. This file ships inside the application b
 |---|---|---|
 | Real-ESRGAN (x4plus, x4plus-anime, animevideov3) | BSD-3-Clause | https://github.com/xinntao/Real-ESRGAN |
 | Real-CUGAN (se, pro) | MIT | https://github.com/bilibili/ailab / nihui/realcugan-ncnn-vulkan |
-| RIFE v4.6 | MIT | https://github.com/hzwer/ECCV2022-RIFE / nihui/rife-ncnn-vulkan |
+| RIFE 4.6, 4.22 lite, 4.25, 4.26 | MIT, © 2021 hzwer (weights); ncnn conversions MIT, © 2020 nihui | https://github.com/hzwer/Practical-RIFE / nihui/rife-ncnn-vulkan / TNTwise/rife-ncnn-vulkan (commit `13338e3`) |
 | YuNet face detector (2023mar), ncnn conversion | MIT, © 2020 Shiqi Yu | https://github.com/opencv/opencv_zoo / huggingface.co/lightcella/face-pipeline-ncnn |
 | CodeFormer (face restoration), ncnn conversion | **S-Lab License 1.0: non-commercial use only**, © 2022 S-Lab | https://github.com/sczhou/CodeFormer (weights) / https://github.com/FeiGeChuanShu/CodeFormer-ncnn (ncnn conversion, commit `cfe0fe2`) |
 

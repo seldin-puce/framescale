@@ -9,22 +9,123 @@
 #include <stdexcept>
 #include <string>
 
+#include "command.h"
 #include "gpu.h"
 #include "layer.h"
 #include "net.h"
+#include "pipeline.h"
 
 namespace fsncnn {
 
 namespace {
 
 // ---------------------------------------------------------------------------
-// rife.Warp: bilinear backward warp of `image` by optical `flow`.
+// rife.Warp: bilinear backward warp of `image` by optical `flow`, with border
+// clamping (PyTorch grid_sample, padding_mode="border").
 // bottom[0] = image (C×H×W), bottom[1] = flow (2×H×W: dx, dy).
-// CPU implementation. ncnn moves blobs between GPU and CPU around it.
+// Runs on the GPU in Vulkan nets (after nihui/rife-ncnn-vulkan's warp, MIT);
+// the CPU version serves CPU nets. Coordinates stay fp32 in the shader: fp16
+// can't address pixels past ~2048 precisely.
 // ---------------------------------------------------------------------------
+const char* const kWarpPack1 = R"glsl(
+#version 450
+layout(binding = 0) readonly buffer image_blob { sfp image_data[]; };
+layout(binding = 1) readonly buffer flow_blob { sfp flow_data[]; };
+layout(binding = 2) writeonly buffer top_blob { sfp top_data[]; };
+layout(push_constant) uniform parameter { int w; int h; int c; int cstep; int fcstep; } p;
+void main()
+{
+    int gx = int(gl_GlobalInvocationID.x);
+    int gy = int(gl_GlobalInvocationID.y);
+    int gz = int(gl_GlobalInvocationID.z);
+    if (gx >= p.w || gy >= p.h || gz >= p.c) return;
+    int i = gy * p.w + gx;
+    float sx = float(gx) + float(buffer_ld1(flow_data, i));
+    float sy = float(gy) + float(buffer_ld1(flow_data, p.fcstep + i));
+    int x0 = int(floor(sx));
+    int y0 = int(floor(sy));
+    float a = sx - float(x0);
+    float b = sy - float(y0);
+    int cx0 = clamp(x0, 0, p.w - 1);
+    int cx1 = clamp(x0 + 1, 0, p.w - 1);
+    int cy0 = clamp(y0, 0, p.h - 1);
+    int cy1 = clamp(y0 + 1, 0, p.h - 1);
+    int base = gz * p.cstep;
+    float v0 = float(buffer_ld1(image_data, base + cy0 * p.w + cx0));
+    float v1 = float(buffer_ld1(image_data, base + cy0 * p.w + cx1));
+    float v2 = float(buffer_ld1(image_data, base + cy1 * p.w + cx0));
+    float v3 = float(buffer_ld1(image_data, base + cy1 * p.w + cx1));
+    float v = mix(mix(v0, v1, a), mix(v2, v3, a), b);
+    buffer_st1(top_data, base + i, afp(v));
+}
+)glsl";
+
+const char* const kWarpPack4 = R"glsl(
+#version 450
+layout(binding = 0) readonly buffer image_blob { sfpvec4 image_data[]; };
+layout(binding = 1) readonly buffer flow_blob { sfp flow_data[]; };
+layout(binding = 2) writeonly buffer top_blob { sfpvec4 top_data[]; };
+layout(push_constant) uniform parameter { int w; int h; int c; int cstep; int fcstep; } p;
+void main()
+{
+    int gx = int(gl_GlobalInvocationID.x);
+    int gy = int(gl_GlobalInvocationID.y);
+    int gz = int(gl_GlobalInvocationID.z);
+    if (gx >= p.w || gy >= p.h || gz >= p.c) return;
+    int i = gy * p.w + gx;
+    float sx = float(gx) + float(buffer_ld1(flow_data, i));
+    float sy = float(gy) + float(buffer_ld1(flow_data, p.fcstep + i));
+    int x0 = int(floor(sx));
+    int y0 = int(floor(sy));
+    float a = sx - float(x0);
+    float b = sy - float(y0);
+    int cx0 = clamp(x0, 0, p.w - 1);
+    int cx1 = clamp(x0 + 1, 0, p.w - 1);
+    int cy0 = clamp(y0, 0, p.h - 1);
+    int cy1 = clamp(y0 + 1, 0, p.h - 1);
+    int base = gz * p.cstep;
+    vec4 v0 = vec4(buffer_ld4(image_data, base + cy0 * p.w + cx0));
+    vec4 v1 = vec4(buffer_ld4(image_data, base + cy0 * p.w + cx1));
+    vec4 v2 = vec4(buffer_ld4(image_data, base + cy1 * p.w + cx0));
+    vec4 v3 = vec4(buffer_ld4(image_data, base + cy1 * p.w + cx1));
+    vec4 v = mix(mix(v0, v1, a), mix(v2, v3, a), b);
+    buffer_st4(top_data, base + i, afpvec4(v));
+}
+)glsl";
+
 class Warp : public ncnn::Layer {
 public:
-    Warp() { one_blob_only = false; }
+    Warp() {
+        one_blob_only = false;
+        support_vulkan = true;
+        support_vulkan_packing = true;
+    }
+
+    int create_pipeline(const ncnn::Option& opt) override {
+        if (!vkdev) return 0;
+        for (int pack : {1, 4}) {
+            const char* src = pack == 4 ? kWarpPack4 : kWarpPack1;
+            std::vector<uint32_t> spirv;
+            int r = ncnn::compile_spirv_module(src, (int)std::strlen(src), opt, spirv);
+            if (r != 0) return r;
+            auto* pipeline = new ncnn::Pipeline(vkdev);
+            pipeline->set_optimal_local_size_xyz(8, 8, pack == 4 ? 1 : 4);
+            r = pipeline->create(spirv.data(), spirv.size() * 4, {});
+            if (r != 0) {
+                delete pipeline;
+                return r;
+            }
+            (pack == 4 ? pack4_ : pack1_) = pipeline;
+        }
+        return 0;
+    }
+
+    int destroy_pipeline(const ncnn::Option&) override {
+        delete pack1_;
+        delete pack4_;
+        pack1_ = pack4_ = nullptr;
+        return 0;
+    }
 
     int forward(const std::vector<ncnn::Mat>& bottom, std::vector<ncnn::Mat>& top,
                 const ncnn::Option& opt) const override {
@@ -34,7 +135,6 @@ public:
         ncnn::Mat& out = top[0];
         out.create(w, h, c, image.elemsize, opt.blob_allocator);
         if (out.empty()) return -100;
-
         const float* fx = flow.channel(0);
         const float* fy = flow.channel(1);
         #pragma omp parallel for num_threads(opt.num_threads)
@@ -58,8 +158,30 @@ public:
         }
         return 0;
     }
-};
 
+    int forward(const std::vector<ncnn::VkMat>& bottom, std::vector<ncnn::VkMat>& top, ncnn::VkCompute& cmd,
+                const ncnn::Option& opt) const override {
+        const ncnn::VkMat& image = bottom[0];
+        const ncnn::VkMat& flow = bottom[1];
+        if (flow.elempack != 1 || flow.c < 2 || flow.w != image.w || flow.h != image.h) return -1;
+        ncnn::VkMat& out = top[0];
+        out.create(image.w, image.h, image.c, image.elemsize, image.elempack, opt.blob_vkallocator);
+        if (out.empty()) return -100;
+        std::vector<ncnn::VkMat> bindings{image, flow, out};
+        std::vector<ncnn::vk_constant_type> constants(5);
+        constants[0].i = out.w;
+        constants[1].i = out.h;
+        constants[2].i = out.c;
+        constants[3].i = (int)out.cstep;
+        constants[4].i = (int)flow.cstep;
+        cmd.record_pipeline(image.elempack == 4 ? pack4_ : pack1_, bindings, constants, out);
+        return 0;
+    }
+
+private:
+    ncnn::Pipeline* pack1_ = nullptr;
+    ncnn::Pipeline* pack4_ = nullptr;
+};
 ncnn::Layer* warp_creator(void*) { return new Warp; }
 
 std::once_flag g_gpu_once;

@@ -51,7 +51,12 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
     { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
   faceFix: [{ id: "codeformer", label: "CodeFormer" }],
-  interpolate: [{ id: "rife-v4.6", label: "RIFE v4.6" }],
+  interpolate: [
+    { id: "rife-v4.25", label: "RIFE 4.25 (recommended)" },
+    { id: "rife-v4.26", label: "RIFE 4.26 (newest)" },
+    { id: "rife-v4.22-lite", label: "RIFE 4.22 lite (lighter)" },
+    { id: "rife-v4.6", label: "RIFE 4.6 (classic)" },
+  ],
 };
 
 const defaults = (enabled: boolean, model: string): StageState => ({
@@ -230,7 +235,7 @@ export const useApp = create<AppStore>()((set, get) => ({
     denoise: defaults(false, "realcugan-se"),
     upscale: defaults(true, "realesrgan-x4plus"),
     faceFix: defaults(false, "codeformer"),
-    interpolate: defaults(false, "rife-v4.6"),
+    interpolate: defaults(false, "rife-v4.25"),
   },
   selectedStage: "upscale",
   output: { codec: "hevc10", container: "mp4", quality: 20 },

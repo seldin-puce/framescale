@@ -121,6 +121,36 @@ fn main() {
                 10,
             ),
             (
+                "RIFE v4.22 lite     1920×1080",
+                StageConfig::Interpolate {
+                    model: m("rife-v4.22-lite"),
+                    factor: 2,
+                    scene_threshold: 10.0,
+                },
+                (1920, 1080),
+                10,
+            ),
+            (
+                "RIFE v4.25          1920×1080",
+                StageConfig::Interpolate {
+                    model: m("rife-v4.25"),
+                    factor: 2,
+                    scene_threshold: 10.0,
+                },
+                (1920, 1080),
+                10,
+            ),
+            (
+                "RIFE v4.26          1920×1080",
+                StageConfig::Interpolate {
+                    model: m("rife-v4.26"),
+                    factor: 2,
+                    scene_threshold: 10.0,
+                },
+                (1920, 1080),
+                10,
+            ),
+            (
                 "RIFE v4.6           3840×2160",
                 StageConfig::Interpolate {
                     model: m("rife-v4.6"),

@@ -130,8 +130,26 @@ pub struct DeviceSel {
 
 /// Context pixels around each SR tile (Real-ESRGAN's own default).
 const SR_PAD: usize = 10;
-/// RIFE v4 needs dimensions divisible by 32.
-const RIFE_ALIGN: usize = 32;
+/// A RIFE flow network and the frame alignment it needs.
+struct Rife {
+    model: UniquePtr<ffi::Model>,
+    align: usize,
+}
+
+/// RIFE model directory (`models/rife/<id>`) and alignment: frames are padded
+/// to a multiple of the network's coarsest flow scale (32, or 64 for 4.25+).
+fn resolve_rife(models: &Path, id: &str) -> Result<(PathBuf, usize), EngineError> {
+    let align = match id {
+        "rife-v4.6" | "rife-v4.22-lite" => 32,
+        "rife-v4.25" | "rife-v4.26" => 64,
+        _ => {
+            return Err(EngineError::ModelNotFound(format!(
+                "unknown interpolation model '{id}'"
+            )));
+        }
+    };
+    Ok((models.join("rife").join(id), align))
+}
 
 struct Sr {
     model: UniquePtr<ffi::Model>,
@@ -367,7 +385,7 @@ pub struct NcnnBackend {
     /// Reused SR output buffer (resized on demand).
     scratch: Planar,
     gpu: bool,
-    rife: Option<UniquePtr<ffi::Model>>,
+    rife: Option<Rife>,
     device_name: String,
     max_tile: u32,
 }
@@ -531,19 +549,21 @@ impl NcnnBackend {
                     });
                 }
                 StageConfig::Interpolate { model, .. } => {
-                    if model.id != "rife-v4.6" {
-                        return Err(EngineError::ModelNotFound(format!(
-                            "unknown interpolation model '{}'",
-                            model.id
-                        )));
+                    if model.path.is_some() {
+                        return Err(EngineError::Unsupported(
+                            "custom interpolation models are not supported yet".into(),
+                        ));
                     }
-                    let dir = models.join("rife").join("rife-v4.6");
-                    rife = Some(load(
-                        &device,
-                        threads,
-                        &dir.join("flownet.param"),
-                        &dir.join("flownet.bin"),
-                    )?);
+                    let (dir, align) = resolve_rife(models, &model.id)?;
+                    rife = Some(Rife {
+                        model: load(
+                            &device,
+                            threads,
+                            &dir.join("flownet.param"),
+                            &dir.join("flownet.bin"),
+                        )?,
+                        align,
+                    });
                 }
             }
         }
@@ -680,10 +700,11 @@ impl InferenceBackend for NcnnBackend {
                 "interpolate: frame size mismatch".into(),
             ));
         }
-        let pa = planar::pad_to_multiple(&planar::from_frame(a), RIFE_ALIGN);
-        let pb = planar::pad_to_multiple(&planar::from_frame(b), RIFE_ALIGN);
+        let pa = planar::pad_to_multiple(&planar::from_frame(a), rife.align);
+        let pb = planar::pad_to_multiple(&planar::from_frame(b), rife.align);
         let mut o = Planar::zeros(pa.w, pa.h);
-        rife.run_rife(&pa.data, &pb.data, pa.w as i32, pa.h as i32, t, &mut o.data)
+        rife.model
+            .run_rife(&pa.data, &pb.data, pa.w as i32, pa.h as i32, t, &mut o.data)
             .map_err(|e| map_err(&e, tile))?;
         Ok(planar::to_frame(
             &o.region(0, 0, a.width as usize, a.height as usize),
@@ -711,5 +732,10 @@ mod tests {
             resolve_sr(m, "nope", 2),
             Err(EngineError::ModelNotFound(_))
         ));
+        let (dir, align) = resolve_rife(m, "rife-v4.25").expect("4.25");
+        assert!(dir.ends_with("rife/rife-v4.25"));
+        assert_eq!(align, 64);
+        assert_eq!(resolve_rife(m, "rife-v4.6").expect("4.6").1, 32);
+        assert!(resolve_rife(m, "rife-v9").is_err());
     }
 }

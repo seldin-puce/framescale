@@ -132,36 +132,48 @@ fn real_models_on_every_device() {
         let o = b4.process(&src, 512).expect("x4plus");
         assert_eq!((o.width, o.height), (128, 96));
 
-        // RIFE v4.6 (custom rife.Warp layer): identical inputs → (almost) the same frame.
-        let mut r = NcnnBackend::new(
-            &plan(
-                vec![StageConfig::Interpolate {
-                    model: m("rife-v4.6"),
-                    factor: 2,
-                    scene_threshold: 10.0,
-                }],
-                &models,
-            ),
-            dev.clone(),
-            4,
-        )
-        .expect("load rife");
-        let still = r.interpolate(&src, &src, 0.5, 0).expect("rife still");
-        let d_still = mean_abs_diff(&still, &src);
-        eprintln!("   rife(a, a) mean |Δ| = {d_still:.3}");
-        assert!(
-            d_still < 3.0,
-            "RIFE should be ~identity for identical frames: {d_still}"
-        );
-        // Moving content: the midpoint should differ from both ends.
+        // RIFE (custom rife.Warp layer), every bundled version: identical
+        // inputs → (almost) the same frame; a 6 px move → close to the 3 px
+        // midpoint; padding (32, or 64 for 4.25+) is cropped back.
         let moved = test_frame(64, 48, 6);
-        let mid = r.interpolate(&src, &moved, 0.5, 0).expect("rife motion");
-        assert_eq!(
-            (mid.width, mid.height),
-            (64, 48),
-            "padding to 32 is cropped back"
-        );
-        assert!(mean_abs_diff(&mid, &src) > 0.5 && mean_abs_diff(&mid, &moved) > 0.5);
+        let halfway = test_frame(64, 48, 3);
+        for id in ["rife-v4.6", "rife-v4.22-lite", "rife-v4.25", "rife-v4.26"] {
+            let mut r = NcnnBackend::new(
+                &plan(
+                    vec![StageConfig::Interpolate {
+                        model: m(id),
+                        factor: 2,
+                        scene_threshold: 10.0,
+                    }],
+                    &models,
+                ),
+                dev.clone(),
+                4,
+            )
+            .unwrap_or_else(|e| panic!("load {id}: {e}"));
+            let still = r.interpolate(&src, &src, 0.5, 0).expect("rife still");
+            let d_still = mean_abs_diff(&still, &src);
+            let mid = r.interpolate(&src, &moved, 0.5, 0).expect("rife motion");
+            assert_eq!(
+                (mid.width, mid.height),
+                (64, 48),
+                "{id}: padding cropped back"
+            );
+            let (d_a, d_b, d_half) = (
+                mean_abs_diff(&mid, &src),
+                mean_abs_diff(&mid, &moved),
+                mean_abs_diff(&mid, &halfway),
+            );
+            eprintln!(
+                "   {id}: rife(a, a) |Δ| {d_still:.3}; midpoint |Δ| to a {d_a:.2}, b {d_b:.2}, true midpoint {d_half:.2}"
+            );
+            assert!(
+                d_still < 3.0,
+                "{id}: ~identity for identical frames: {d_still}"
+            );
+            assert!(d_a > 0.5 && d_b > 0.5, "{id}: the midpoint moves");
+            assert!(d_half < d_a.min(d_b), "{id}: closer to the true midpoint");
+        }
 
         // Inside the device loop: ncnn::shutdown() below ends Vulkan for good.
         check_real_cugan(&dev, &models);

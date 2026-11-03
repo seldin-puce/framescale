@@ -19,8 +19,10 @@
   Vulkan via SimpleVK (no SDK; the loader is dlopen'd) and ncnn's
   self-contained OpenMP on Linux/macOS. `cpp/bridge.cpp` is a cxx bridge.
 - Models: Real-ESRGAN x4plus / x4plus-anime (native ×4, exact area-downscale to
-  ×2/×3) and AnimeVideo-v3 ×2/×3/×4. RIFE v4.6 runs through our own `rife.Warp`
-  custom layer (CPU bilinear warp; ncnn moves blobs to and from the GPU).
+  ×2/×3) and AnimeVideo-v3 ×2/×3/×4. RIFE 4.6, 4.22 lite, 4.25 (default) and
+  4.26 run through our own `rife.Warp` custom layer: a Vulkan bilinear warp
+  (pack1/pack4 shaders after nihui's, fp32 coordinates) with a CPU twin for CPU
+  nets. 4.25 and 4.26 need frames padded to a multiple of 64, the rest 32.
 - Tiling with 10 px context in Rust (`planar::tiled`). It's bit-exact against
   untiled output for a 1-px-receptive-field model, and ≈0.1/255 mean seam
   error with the real models.
@@ -42,8 +44,14 @@ plus CPU-side conversion; excludes decode/encode):
 | Real-ESR AnimeVideo-v3 ×2, 1920×1080 → 3840×2160 | **10.9** |
 | Real-ESRGAN x4plus ×4, 960×540 → 3840×2160 | **1.31** |
 | Real-ESRGAN x4plus ×2, 1920×1080 → 3840×2160 | 0.31 |
-| RIFE v4.6, 1920×1080 | 4.5 |
-| RIFE v4.6, 3840×2160 | 1.14 |
+| RIFE 4.6, 1920×1080 | 15.6 |
+| RIFE 4.22 lite / 4.25 / 4.26, 1920×1080 | 14.5 / 14.1 / 14.3 |
+| RIFE 4.6, 3840×2160 | 3.0 |
+
+RIFE was 4.4 fps (4.6) and 2.3 fps (4.25) at 1080p while `rife.Warp` ran on
+the CPU: every warp (8 in 4.6, 18 in 4.25) copied its blobs GPU → CPU → GPU.
+With the warp on the GPU the remaining time is mostly CPU-side conversion and
+padding, so the network version barely matters on this GPU.
 
 How we got there (from 2.7 / 0.56 fps):
 - Host Mesa 26.2 vs Debian's 25.0: RDNA4 cooperative matrix exposed; ~1.5×.
