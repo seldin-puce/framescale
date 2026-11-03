@@ -30,6 +30,21 @@ pub struct Face {
     pub kps: [[f32; 2]; 5],
 }
 
+impl Face {
+    /// Where the nose tip sits between the eyes, along the eye line: about
+    /// 0.5 for a face looking at the camera, towards 0 or 1 (or beyond) as
+    /// the head turns into profile.
+    pub fn nose_position(&self) -> f32 {
+        let [l, r, n, _, _] = self.kps;
+        let (ex, ey) = (r[0] - l[0], r[1] - l[1]);
+        let d2 = ex * ex + ey * ey;
+        if d2 < 1e-6 {
+            return 0.0;
+        }
+        ((n[0] - l[0]) * ex + (n[1] - l[1]) * ey) / d2
+    }
+}
+
 /// 2×3 affine map `(x, y) → (a·x + b·y + tx, c·x + d·y + ty)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Affine(pub [f32; 6]);
@@ -335,6 +350,20 @@ pub fn with_fidelity(param: &str, w: f32) -> (String, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nose_position_tells_frontal_from_profile() {
+        let face = |kps| Face {
+            score: 1.0,
+            bbox: [0.0, 0.0, 100.0, 100.0],
+            kps,
+        };
+        let frontal = face(TEMPLATE).nose_position();
+        assert!((frontal - 0.5).abs() < 0.05, "{frontal}");
+        let mut turned = TEMPLATE;
+        turned[2][0] = TEMPLATE[1][0] + 15.0; // nose past the far eye
+        assert!(face(turned).nose_position() > 1.0);
+    }
 
     #[test]
     fn similarity_recovers_a_known_transform() {

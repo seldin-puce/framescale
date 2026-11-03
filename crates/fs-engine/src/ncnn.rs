@@ -341,6 +341,10 @@ const NAF_STRENGTH: [f32; 4] = [0.4, 0.6, 0.8, 1.0];
 const MIN_FACE: f32 = 24.0;
 /// Bound the per-frame cost on crowd shots.
 const MAX_FACES: usize = 12;
+/// How far the nose may sit from the middle of the eyes (0.5) before a face
+/// counts as turned away. Measured: faces looking at the camera 0.43–0.62;
+/// a strong three-quarter view 1.09, a profile −0.33.
+const MAX_TURN: f32 = 0.4;
 /// YuNet confidence needed to restore a face.
 const FACE_SCORE: f32 = 0.7;
 
@@ -425,6 +429,9 @@ impl FaceFix {
             .iter()
             .map(|f| f.scaled(scale))
             .filter(|f| f.bbox[2] >= MIN_FACE)
+            // CodeFormer is trained on faces looking at the camera; it
+            // distorts profiles and strongly turned heads, so leave them.
+            .filter(|f| (f.nose_position() - 0.5).abs() <= MAX_TURN)
             .take(MAX_FACES)
         {
             let Some(to_face) = face::similarity(&f.kps, &face::TEMPLATE) else {
