@@ -177,6 +177,7 @@ impl Run<'_> {
                 self.emit.send(&WorkerEvent::SegmentCommitted(info));
                 Ok(())
             }
+            WriterResult::PreviewDone => Ok(()),
             WriterResult::Failed { kind, message } => Err(Fatal::new(kind, message)),
         };
         if block_until_closed {
@@ -314,7 +315,38 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
     // --- writer -----------------------------------------------------------------
     let (writer_tx, writer_rx) = bounded::<WriterMsg>(4);
     let (res_tx, res_rx) = crossbeam_channel::unbounded();
-    let writer = writer::spawn(plan.clone(), writer_rx, res_tx);
+    let preview = job.preview.clone();
+    let mut before = None;
+    let writer = match &preview {
+        Some(pv) => {
+            let dir = std::path::Path::new(&pv.out_dir);
+            for sub in ["before", "after"] {
+                std::fs::create_dir_all(dir.join(sub))
+                    .map_err(|e| Fatal::new(FailureKind::Io, format!("preview dir: {e}")))?;
+            }
+            // "Before": the decoded source frames, tone-mapped the same way.
+            let argv = fs_media::argv::jpeg_sequence(
+                plan.decode.width,
+                plan.decode.height,
+                plan.decode.frame_format,
+                &plan.decode.color,
+                &dir.join("before").join("%04d.jpg"),
+            );
+            before = Some(
+                crate::ffmpeg::SegmentEncoder::spawn(&plan.ffmpeg, &argv)
+                    .map_err(|e| Fatal::new(FailureKind::Io, format!("preview encoder: {e}")))?,
+            );
+            writer::spawn_preview(
+                plan.clone(),
+                dir.join("after").join("%04d.jpg"),
+                writer_rx,
+                res_tx,
+            )
+        }
+        None => writer::spawn(plan.clone(), writer_rx, res_tx),
+    };
+    let limit = preview.as_ref().map(|p| p.frames);
+    let mut limit_hit = false;
 
     let now = Instant::now();
     let mut r = Run {
@@ -343,6 +375,10 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
                 let next_segment = seg.as_ref().map_or(job.start.segment, |s| s.index);
                 return Ok(Outcome::Stopped { next_segment });
             }
+            if limit.is_some_and(|l| r.frames_in >= l) {
+                limit_hit = true;
+                break; // preview window done: treat as end of stream
+            }
             let raw = match pending.pop_front() {
                 Some(f) => f,
                 None => match decoder.recv() {
@@ -351,6 +387,11 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
                     DecodeMsg::Error(e) => return Err(Fatal::new(FailureKind::DecodeFailed, e)),
                 },
             };
+            if let Some(b) = before.as_mut() {
+                b.write(&raw.data).map_err(|e| {
+                    Fatal::new(FailureKind::Internal, format!("preview encoder: {e}"))
+                })?;
+            }
             let processed = r.engine(|b, tile| b.process(&raw, tile))?;
             let cur_seg = r.seg_of(n);
 
@@ -401,8 +442,18 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
     if result.is_err() || stopped_now {
         let _ = r.writer_tx.send(WriterMsg::Abort); // discard the partial segment
     }
-    if !finished_cleanly {
-        decoder.kill();
+    if !finished_cleanly || limit_hit {
+        decoder.kill(); // a preview stops mid-stream on purpose
+    }
+    if let Some(b) = before.take() {
+        let (status, log) = b.finish();
+        if result.is_ok() && !status.is_some_and(|s| s.success()) {
+            let why = log.lock().map(|l| l.summary()).unwrap_or_default();
+            return Err(Fatal::new(
+                FailureKind::Internal,
+                format!("preview encoder failed: {why}"),
+            ));
+        }
     }
     let Run {
         emit: emitter,
@@ -419,6 +470,7 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
     for res in results.try_iter() {
         match res {
             WriterResult::Committed(info) => emitter.send(&WorkerEvent::SegmentCommitted(info)),
+            WriterResult::PreviewDone => {}
             WriterResult::Failed { kind, message } => {
                 if final_result.is_ok() {
                     final_result = Err(Fatal::new(kind, message));
@@ -427,7 +479,7 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
         }
     }
 
-    if finished_cleanly {
+    if finished_cleanly && !limit_hit {
         let (status, log) = decoder.finish();
         if let Ok(l) = log.lock() {
             if l.corrupt > 0 {

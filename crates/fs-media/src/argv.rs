@@ -179,6 +179,65 @@ pub fn encode_segment(
     a
 }
 
+/// Raw RGB frames on stdin → numbered JPEGs for display (`pattern` like `…/%04d.jpg`).
+pub fn jpeg_sequence(
+    w: u32,
+    h: u32,
+    fmt: FrameFormat,
+    color: &fs_types::media::ColorProfile,
+    pattern: &Path,
+) -> Argv {
+    let mut a = base("warning");
+    a.args([
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        fmt.pix_fmt(),
+        "-s",
+        &format!("{w}x{h}"),
+        "-i",
+        "pipe:0",
+    ]);
+    a.args(["-vf", &color::display_jpeg_filter(color)]);
+    a.args([
+        "-c:v",
+        "mjpeg",
+        "-q:v",
+        "2",
+        "-start_number",
+        "0",
+        "-f",
+        "image2",
+    ])
+    .arg(pattern);
+    a
+}
+
+/// One small JPEG thumbnail from a source file at `at_s` seconds.
+pub fn thumbnail(
+    input: &Path,
+    stream_index: u32,
+    at_s: f64,
+    color: &fs_types::media::ColorProfile,
+    width: u32,
+    out: &Path,
+) -> Argv {
+    let mut a = base("error");
+    a.args(["-ss", &format!("{at_s:.3}")]).arg("-i").arg(input);
+    a.args(["-map", &format!("0:{stream_index}"), "-frames:v", "1"]);
+    let hp = color.needs_high_precision();
+    let vf = format!(
+        "scale={width}:-2:flags=bicubic,{},{}",
+        color::to_rgb_filter(color, hp),
+        color::display_jpeg_filter(color)
+    );
+    a.args([
+        "-vf", &vf, "-c:v", "mjpeg", "-q:v", "4", "-update", "1", "-y",
+    ])
+    .arg(out);
+    a
+}
+
 /// Concatenate committed segments losslessly (`-c copy`).
 pub fn concat(list_file: &Path, out: &Path) -> Argv {
     let mut a = base("warning");

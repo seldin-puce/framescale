@@ -7,6 +7,7 @@
 
 mod commands;
 mod paths;
+mod protocol;
 mod queue;
 mod settings;
 mod state;
@@ -35,6 +36,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .register_asynchronous_uri_scheme_protocol("fs", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let response = match app.try_state::<std::sync::Arc<state::AppState>>() {
+                    Some(state) => protocol::serve(&state, &request),
+                    None => tauri::http::Response::builder()
+                        .status(503)
+                        .body(Vec::new())
+                        .unwrap_or_default(),
+                };
+                responder.respond(response);
+            });
+        })
         .setup(|app| {
             // Windows: tie every descendant process to our lifetime (zombie reaper).
             if let Err(e) = fs_proc::install_kill_on_close_job() {
@@ -65,6 +79,8 @@ pub fn run() {
             commands::activate_license,
             commands::set_eco_mode,
             commands::disk_free,
+            commands::render_preview,
+            commands::thumbnail,
             commands::subscribe_jobs,
             commands::subscribe_telemetry,
         ])

@@ -11,6 +11,7 @@ pub mod job;
 pub mod license;
 pub mod media;
 pub mod pipeline;
+pub mod preview;
 pub mod telemetry;
 pub mod worker;
 
@@ -27,4 +28,5 @@ pub use pipeline::{
     Container, EncoderPreference, JobSpec, ModelRef, OutputSpec, PipelineError, PipelineSpec,
     StageConfig, StageKind, VideoCodec,
 };
+pub use preview::PreviewResult;
 pub use telemetry::{DeviceTelemetry, EcoMode, EcoState, Telemetry};

@@ -248,6 +248,13 @@ export function createDemoBackend(): Backend {
     async setEcoMode(mode) {
       eco = mode;
     },
+    async renderPreview() {
+      return fail("demo", "Previews run the real engine. Open FrameScale as the desktop app to render one.");
+    },
+    async thumbnail() {
+      return "";
+    },
+    assetUrl: (rel) => rel,
     async subscribeJobs(cb) {
       jobSubs.add(cb);
       return () => jobSubs.delete(cb);

@@ -36,7 +36,12 @@ pub enum WriterMsg {
 #[derive(Debug)]
 pub enum WriterResult {
     Committed(SegmentInfo),
-    Failed { kind: FailureKind, message: String },
+    /// Preview mode: all frames written.
+    PreviewDone,
+    Failed {
+        kind: FailureKind,
+        message: String,
+    },
 }
 
 fn failure_from(log: &StderrLog, fallback: &str) -> (FailureKind, String) {
@@ -173,5 +178,63 @@ pub fn spawn(
             enc.kill();
             let _ = std::fs::remove_file(part_path(i));
         }
+    })
+}
+
+/// Preview mode: every output frame goes to one JPEG-sequence encoder.
+/// Segment boundaries (`Close`) are irrelevant and ignored.
+pub fn spawn_preview(
+    plan: Arc<RenderPlan>,
+    pattern: PathBuf,
+    rx: Receiver<WriterMsg>,
+    results: Sender<WriterResult>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut enc: Option<SegmentEncoder> = None;
+        let fail = |message: String| {
+            let _ = results.send(WriterResult::Failed {
+                kind: FailureKind::Internal,
+                message,
+            });
+        };
+        for msg in rx {
+            match msg {
+                WriterMsg::Frame { frame, .. } => {
+                    if enc.is_none() {
+                        let argv = fs_media::argv::jpeg_sequence(
+                            frame.width,
+                            frame.height,
+                            frame.format,
+                            &plan.encode.color,
+                            &pattern,
+                        );
+                        match SegmentEncoder::spawn(&plan.ffmpeg, &argv) {
+                            Ok(e) => enc = Some(e),
+                            Err(e) => return fail(format!("could not start preview encoder: {e}")),
+                        }
+                    }
+                    if let Some(e) = enc.as_mut()
+                        && e.write(&frame.data).is_err()
+                    {
+                        return fail("preview encoder exited early".into());
+                    }
+                }
+                WriterMsg::Close(_) => {}
+                WriterMsg::Abort => {
+                    if let Some(e) = enc.take() {
+                        e.kill();
+                    }
+                    return;
+                }
+            }
+        }
+        if let Some(e) = enc.take() {
+            let (status, log) = e.finish();
+            if !status.is_some_and(|s| s.success()) {
+                let why = log.lock().map(|l| l.summary()).unwrap_or_default();
+                return fail(format!("preview encoder failed: {why}"));
+            }
+        }
+        let _ = results.send(WriterResult::PreviewDone);
     })
 }

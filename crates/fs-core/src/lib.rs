@@ -8,6 +8,7 @@
 #![deny(unsafe_code)]
 
 pub mod janitor;
+pub mod preview;
 pub mod recovery;
 pub mod runner;
 pub mod storage;

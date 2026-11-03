@@ -176,6 +176,19 @@ pub struct WorkerJob {
     pub license_token: Option<String>,
     /// Governor duty cycle (0.1–1.0).
     pub duty: f32,
+    /// Preview mode: render only `frames` input frames to JPEG sequences
+    /// instead of encoded segments.
+    #[serde(default)]
+    pub preview: Option<PreviewRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewRequest {
+    /// Input (conformed) frames to process.
+    pub frames: u64,
+    /// Receives `before/%04d.jpg` and `after/%04d.jpg`.
+    pub out_dir: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

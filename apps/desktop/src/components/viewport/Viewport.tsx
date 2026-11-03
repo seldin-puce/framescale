@@ -1,11 +1,14 @@
 import { Columns2, Eye, Maximize2, SquareSplitHorizontal, ZoomIn, ZoomOut } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { makeSamplePair } from "@/gl/sample";
-import { useApp, type CompareMode } from "@/stores/app";
+import { usePreviewPlayer } from "@/hooks/usePreviewPlayer";
+import { backend } from "@/ipc";
+import { timecode } from "@/lib/format";
+import { COMING_SOON, STAGE_ORDER, useApp, type CompareMode } from "@/stores/app";
 import { IconButton } from "../ui/IconButton";
 import { Tooltip } from "../ui/Tooltip";
 import { CompareStage } from "./CompareStage";
-import { Timeline } from "./Timeline";
+import { SNIPPET_S, Timeline } from "./Timeline";
 
 const MODES: { value: CompareMode; label: string; icon: typeof Columns2 }[] = [
   { value: "split", label: "Split view", icon: SquareSplitHorizontal },
@@ -19,16 +22,39 @@ export function Viewport() {
   const selected = useApp((s) => s.selected);
   const draft = useApp((s) => s.drafts.find((d) => d.path === selected));
   const job = useApp((s) => (selected ? s.jobs[selected] : undefined));
+  const stages = useApp((s) => s.stages);
+  const preview = useApp((s) => s.preview);
+  const renderPreview = useApp((s) => s.renderPreview);
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(0);
   const [zoomReq, setZoomReq] = useState<{ zoom: number; seq: number }>();
+  const [t, setT] = useState(0);
 
-  // Until the 2 s preview path lands, show a clearly-labelled sample pair.
   const sample = useMemo(() => makeSamplePair(), []);
   const info = draft?.info ?? null;
+  const sourcePath = draft?.path ?? job?.spec.input ?? null;
   const duration = info?.durationS ?? 60;
+  useEffect(() => setT(Math.max(0, Math.min(duration - SNIPPET_S, duration * 0.3))), [sourcePath, duration]);
 
-  const request = (z: number) => setZoomReq((r) => ({ zoom: z, seq: (r?.seq ?? 0) + 1 }));
+  // A preview is only shown for the clip it was rendered from.
+  const current = preview.path === sourcePath ? preview : null;
+  const player = usePreviewPlayer(current?.status === "ready" ? current.result : null);
+  const r = current?.result ?? null;
+  const pair = player.pair ?? sample;
+  const showingPreview = player.pair != null;
+
+  const unsupported = STAGE_ORDER.filter((k) => stages[k].enabled && COMING_SOON.has(k));
+  const canRender = backend.kind === "tauri" && !!info && unsupported.length === 0;
+  const renderHint =
+    backend.kind !== "tauri"
+      ? "Previews run the real engine: open FrameScale as the desktop app."
+      : !info
+        ? "Select a clip to preview."
+        : unsupported.length
+          ? "Turn off stages marked Soon to preview."
+          : "Run your exact pipeline on the GPU for 2 s from the marker.";
+
+  const request = (z: number) => setZoomReq((q) => ({ zoom: z, seq: (q?.seq ?? 0) + 1 }));
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-2 p-2">
@@ -52,17 +78,27 @@ export function Viewport() {
               {info.video.color.transfer === "pq" ? " · HDR10" : info.video.color.transfer === "hlg" ? " · HLG" : ""}
             </span>
           )}
-          <Tooltip label="A procedural sample is shown until a 2 s preview of your clip is rendered.">
-            <span className="rounded-[4px] bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-warn uppercase ring-1 ring-warn/25">
-              Sample
-            </span>
-          </Tooltip>
+          {showingPreview && r ? (
+            <Tooltip
+              label={`${r.afterFrames} frames at ${r.width}×${r.height} rendered in ${(r.elapsedMs / 1000).toFixed(1)} s by ${r.backend}${r.device ? ` on ${r.device}` : ""}${r.toneMapped ? ". HDR is tone-mapped for display only; the render keeps HDR." : "."}`}
+            >
+              <span className="rounded-[4px] bg-accent/12 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-accent uppercase ring-1 ring-accent/25">
+                Preview {timecode(r.startS)} · {player.frame + 1}/{player.frames}
+              </span>
+            </Tooltip>
+          ) : (
+            <Tooltip label="A procedural sample is shown until a 2 s preview of your clip is rendered.">
+              <span className="rounded-[4px] bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-warn uppercase ring-1 ring-warn/25">
+                Sample
+              </span>
+            </Tooltip>
+          )}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <CompareStage
-          pair={sample}
+          pair={pair}
           mode={mode}
           beforeLabel="Source"
           afterLabel="FrameScale"
@@ -70,9 +106,29 @@ export function Viewport() {
           fitSignal={fit}
           {...(zoomReq ? { zoomRequest: zoomReq } : {})}
         />
+        {current?.status === "rendering" && (
+          <div className="pointer-events-none absolute inset-x-0 top-12 flex justify-center">
+            <span className="rounded-sm bg-black/70 px-3 py-1.5 text-xs text-fg backdrop-blur-sm ring-1 ring-border">
+              Rendering 2 s on the GPU…
+            </span>
+          </div>
+        )}
       </div>
 
-      <Timeline duration={duration} cuts={[]} disabled={!info && !job} />
+      <Timeline
+        duration={duration}
+        t={t}
+        onSeek={setT}
+        cuts={[]}
+        canRender={canRender}
+        renderHint={renderHint}
+        rendering={current?.status === "rendering"}
+        onRender={() => void renderPreview(t)}
+        playable={showingPreview}
+        playing={player.playing}
+        onTogglePlay={() => player.setPlaying((p) => !p)}
+        playhead={showingPreview && player.frames ? player.frame / player.frames : null}
+      />
     </div>
   );
 }

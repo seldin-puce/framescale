@@ -549,6 +549,7 @@ async fn run_worker_once(
         start: start.clone(),
         license_token: ctx.svc.license_token.clone(),
         duty: ctx.svc.duty,
+        preview: None,
     };
     send(&mut stdin, &WorkerCommand::Start(Box::new(job))).await;
 

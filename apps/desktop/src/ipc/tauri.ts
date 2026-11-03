@@ -5,6 +5,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Backend, HardwareInfo, LicenseInfo, ProbeResult } from "./backend";
 
+const IS_WINDOWS = typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
+
 const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "avi", "webm", "m4v", "mts", "m2ts", "ts", "mxf", "wmv", "flv", "mpg", "mpeg"];
 
 export const tauriBackend: Backend = {
@@ -22,6 +24,11 @@ export const tauriBackend: Backend = {
   getLicense: () => invoke<LicenseInfo>("get_license"),
   activateLicense: (token) => invoke<LicenseInfo>("activate_license", { token }),
   setEcoMode: (mode) => invoke("set_eco_mode", { mode }),
+  renderPreview: (path, atS, pipeline) => invoke("render_preview", { path, atS, pipeline }),
+  thumbnail: (path) => invoke("thumbnail", { path }),
+  // Custom protocols are `scheme://localhost/…` on macOS/Linux and
+  // `http://scheme.localhost/…` on Windows (WebView2).
+  assetUrl: (rel) => (IS_WINDOWS ? `http://fs.localhost/${rel}` : `fs://localhost/${rel}`),
 
   async subscribeJobs(cb) {
     let live = true;

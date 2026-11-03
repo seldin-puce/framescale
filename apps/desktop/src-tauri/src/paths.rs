@@ -15,6 +15,8 @@ pub struct Paths {
     pub license: PathBuf,
     pub settings: PathBuf,
     pub work_root: PathBuf,
+    pub previews: PathBuf,
+    pub thumbs: PathBuf,
 }
 
 /// Tauri installs sidecars next to the main executable with the target-triple
@@ -43,6 +45,8 @@ impl Paths {
             license: data.join("license.token"),
             settings: data.join("settings.json"),
             work_root: cache.join("jobs"),
+            previews: cache.join("previews"),
+            thumbs: cache.join("thumbs"),
         })
     }
 }

@@ -35,6 +35,7 @@ export type { OutputSpec } from "./generated/OutputSpec";
 export type { PauseMode } from "./generated/PauseMode";
 export type { PipelineError } from "./generated/PipelineError";
 export type { PipelineSpec } from "./generated/PipelineSpec";
+export type { PreviewResult } from "./generated/PreviewResult";
 export type { Rational } from "./generated/Rational";
 export type { StageConfig } from "./generated/StageConfig";
 export type { StageKind } from "./generated/StageKind";

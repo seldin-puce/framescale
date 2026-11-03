@@ -2,6 +2,7 @@ import type { JobProgress, JobSummary, MediaInfo } from "@framescale/ipc-types";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CircleCheck, CircleX, Film, GripVertical, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, TriangleAlert } from "lucide-react";
+import { useThumbnail } from "@/hooks/useThumbnail";
 import { cn } from "@/lib/cn";
 import { basename, duration } from "@/lib/format";
 import { useApp } from "@/stores/app";
@@ -20,10 +21,16 @@ const STATE_LABEL: Record<JobSummary["state"], string> = {
   cancelled: "Cancelled",
 };
 
-function Thumb({ info, hdr }: { info: MediaInfo | null; hdr: boolean }) {
+function Thumb({ path, info, hdr, ready }: { path: string; info: MediaInfo | null; hdr: boolean; ready: boolean }) {
+  // Only ask for a thumbnail once the file is known to be readable.
+  const url = useThumbnail(path, ready);
   return (
     <div className="relative grid h-10 w-16 shrink-0 place-items-center overflow-hidden rounded-[5px] bg-gradient-to-br from-surface-raised to-black ring-1 ring-border">
-      <Film className="size-4 text-fg-subtle" strokeWidth={1.5} />
+      {url ? (
+        <img src={url} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+      ) : (
+        <Film className="size-4 text-fg-subtle" strokeWidth={1.5} />
+      )}
       {info && (
         <span className="absolute right-0.5 bottom-0.5 rounded-[3px] bg-black/70 px-1 font-mono text-[8px] leading-tight text-fg-muted">
           {info.video.height >= 2160 ? "4K" : `${info.video.height}p`}
@@ -44,7 +51,7 @@ export function DraftRow({ path, info, error }: { path: string; info: MediaInfo 
       className={cn("group flex cursor-pointer items-center gap-2 rounded-sm p-1.5 ring-1", selected ? "bg-accent/10 ring-accent/40" : "ring-transparent hover:bg-white/4")}
       onClick={() => select(path)}
     >
-      <Thumb info={info} hdr={hdr} />
+      <Thumb path={path} info={info} hdr={hdr} ready={info != null} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px]" title={path}>{basename(path)}</div>
         <div className="truncate font-mono text-[10px] text-fg-subtle">
@@ -94,7 +101,7 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
           </button>
         )
       )}
-      <Thumb info={null} hdr={false} />
+      <Thumb path={job.spec.input} info={null} hdr={false} ready />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
           <span className="truncate text-[13px]" title={job.spec.input}>{basename(job.spec.input)}</span>

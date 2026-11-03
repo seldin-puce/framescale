@@ -183,6 +183,81 @@ pub fn enqueue_jobs(state: S<'_>, specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     Ok(ids)
 }
 
+fn reject_unsupported(pipeline: &fs_types::PipelineSpec) -> R<()> {
+    if let Some(s) = pipeline.stages.iter().find(|s| {
+        matches!(
+            s,
+            fs_types::StageConfig::Denoise { .. } | fs_types::StageConfig::FaceFix { .. }
+        )
+    }) {
+        return Err(err(
+            "unsupported",
+            format!("{:?} isn't available in this build yet", s.kind()),
+        ));
+    }
+    pipeline
+        .validate()
+        .map_err(|e| err("invalidPipeline", format!("{e:?}")))
+}
+
+/// Render a 2 s preview of `path` at `at_s` with the given pipeline. The
+/// result's `prefix` is served through the `fs://` protocol.
+#[tauri::command]
+pub async fn render_preview(
+    state: S<'_>,
+    path: String,
+    at_s: f64,
+    pipeline: fs_types::PipelineSpec,
+) -> R<fs_types::PreviewResult> {
+    reject_unsupported(&pipeline)?;
+    let probe_spec = JobSpec {
+        input: path.clone(),
+        pipeline: pipeline.clone(),
+        output: fs_types::OutputSpec {
+            path: String::new(),
+            codec: fs_types::VideoCodec::Av1,
+            container: fs_types::Container::Mkv,
+            quality: 30,
+            encoder: fs_types::EncoderPreference::Auto,
+        },
+        device: None,
+    };
+    if let Some(f) = state.entitlements().missing_for(&probe_spec, 0, 0).first() {
+        return Err(pro(*f, "this pipeline uses a Pro feature"));
+    }
+    let tools = fs_core::preview::PreviewTools {
+        ffmpeg: state.paths.ffmpeg.clone(),
+        ffprobe: state.paths.ffprobe.clone(),
+        worker: state.paths.worker.clone(),
+        models_dir: state.paths.models.clone(),
+        device: state.selected_device(),
+        license_token: state.license_token.read().ok().and_then(|t| t.clone()),
+    };
+    fs_core::preview::prune(&state.paths.previews, 4);
+    fs_core::preview::render(
+        &tools,
+        &PathBuf::from(path),
+        at_s,
+        &pipeline,
+        &state.paths.previews,
+    )
+    .await
+    .map_err(|e| err("preview", e))
+}
+
+/// Cached JPEG thumbnail; returns its `fs://` path (e.g. `thumbs/<key>.jpg`).
+#[tauri::command]
+pub async fn thumbnail(state: S<'_>, path: String) -> R<String> {
+    fs_core::preview::thumbnail(
+        &state.paths.ffmpeg,
+        &state.paths.ffprobe,
+        &PathBuf::from(path),
+        &state.paths.thumbs,
+    )
+    .await
+    .map_err(|e| err("thumbnail", e))
+}
+
 #[tauri::command]
 pub fn list_jobs(state: S<'_>) -> R<Vec<JobSummary>> {
     journal(&state, |j| j.list_jobs())

@@ -188,6 +188,7 @@ fn run_worker(plan: &RenderPlan, start: StartPoint, stop_after_ready: bool) -> R
         start,
         license_token: None,
         duty: 1.0,
+        preview: None,
     };
     writeln!(
         stdin,

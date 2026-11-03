@@ -10,6 +10,8 @@ import type {
   JobSummary,
   MediaInfo,
   PauseMode,
+  PipelineSpec,
+  PreviewResult,
   Telemetry,
 } from "@framescale/ipc-types";
 
@@ -64,6 +66,12 @@ export interface Backend {
   getLicense(): Promise<LicenseInfo>;
   activateLicense(token: string): Promise<LicenseInfo>;
   setEcoMode(mode: EcoMode): Promise<void>;
+  /** Render 2 s of `path` from `atS` through `pipeline` (real engine). */
+  renderPreview(path: string, atS: number, pipeline: PipelineSpec): Promise<PreviewResult>;
+  /** Cached JPEG thumbnail; resolves to an `fs://` path for `assetUrl`. */
+  thumbnail(path: string): Promise<string>;
+  /** URL for an `fs://` path (preview frames, thumbnails). */
+  assetUrl(rel: string): string;
   subscribeJobs(cb: (e: JobEvent) => void): Promise<Unsubscribe>;
   subscribeTelemetry(cb: (t: Telemetry) => void): Promise<Unsubscribe>;
   pickFiles(): Promise<string[]>;

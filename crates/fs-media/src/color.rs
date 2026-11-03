@@ -156,6 +156,28 @@ pub fn from_rgb_filter(c: &ColorProfile, pix_fmt: &str) -> String {
     )
 }
 
+/// Full-range RGB in the source colour space → JPEG-ready `yuvj444p` for
+/// *display* (previews, thumbnails). JPEG decoders assume BT.601 full range.
+/// PQ/HLG are tone-mapped (Hable) to SDR BT.709 first; the render itself is
+/// never tone-mapped.
+pub fn display_jpeg_filter(c: &ColorProfile) -> String {
+    // zimg needs every stage fully specified (in *and* out), or it reports
+    // "no path between colorspaces". Verified against the pinned FFmpeg 8.1.
+    let (_, p, t) = tags_in(c);
+    let rgb_in = format!("matrixin=gbr:rangein=full:primariesin={p}:transferin={t}");
+    if c.is_hdr() {
+        format!(
+            "zscale={rgb_in}:matrix=gbr:range=full:primaries={p}:transfer=linear:npl=100,format=gbrpf32le,\
+             zscale=primaries=bt709,tonemap=tonemap=hable:desat=0,zscale=transfer=bt709,format=gbrp,\
+             zscale=matrix=470bg:range=full,format=yuvj444p"
+        )
+    } else {
+        format!(
+            "zscale={rgb_in}:matrix=470bg:range=full:primaries={p}:transfer={t},format=yuvj444p"
+        )
+    }
+}
+
 /// Container/bitstream colour tags for the encoder output.
 pub fn output_tags(c: &ColorProfile) -> Vec<String> {
     let (m, p, t) = tags_in(c);

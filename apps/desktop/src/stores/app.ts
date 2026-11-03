@@ -9,6 +9,7 @@ import type {
   JobSpec,
   JobSummary,
   MediaInfo,
+  PreviewResult,
   StageConfig,
   StageKind,
   VideoCodec,
@@ -108,6 +109,14 @@ export interface Draft {
   error: string | null;
 }
 
+export interface PreviewState {
+  status: "idle" | "rendering" | "ready" | "error";
+  /** Source the preview belongs to (stale once the selection changes). */
+  path: string | null;
+  result: PreviewResult | null;
+  error: string | null;
+}
+
 export type CompareMode = "split" | "side" | "before" | "after";
 
 export interface OutputState {
@@ -132,8 +141,11 @@ interface AppStore {
   compareMode: CompareMode;
   proModal: { open: boolean; feature: Feature | null };
   toast: { kind: "error" | "info"; message: string } | null;
+  preview: PreviewState;
 
   init(): Promise<void>;
+  renderPreview(atS: number): Promise<void>;
+  selectedSource(): { path: string; info: MediaInfo | null } | null;
   addFiles(paths: string[]): Promise<void>;
   removeDraft(path: string): void;
   renderAll(): Promise<void>;
@@ -175,6 +187,31 @@ export const useApp = create<AppStore>()((set, get) => ({
   compareMode: "split",
   proModal: { open: false, feature: null },
   toast: null,
+  preview: { status: "idle", path: null, result: null, error: null },
+
+  selectedSource() {
+    const { selected, drafts, jobs } = get();
+    if (!selected) return null;
+    const d = drafts.find((x) => x.path === selected);
+    if (d) return { path: d.path, info: d.info };
+    const j = jobs[selected as JobId];
+    return j ? { path: j.spec.input, info: null } : null;
+  },
+
+  async renderPreview(atS) {
+    const src = get().selectedSource();
+    if (!src) return;
+    set({ preview: { status: "rendering", path: src.path, result: null, error: null } });
+    try {
+      const result = await backend.renderPreview(src.path, atS, { stages: toStageConfigs(get().stages) });
+      // Ignore a result for a clip that's no longer selected.
+      if (get().preview.path === src.path) set({ preview: { status: "ready", path: src.path, result, error: null } });
+    } catch (e) {
+      const message = isCmdError(e) ? e.message : String(e);
+      set({ preview: { status: "error", path: src.path, result: null, error: message } });
+      get().fail(e);
+    }
+  },
 
   async init() {
     const [license, jobs] = await Promise.all([backend.getLicense(), backend.listJobs()]);
