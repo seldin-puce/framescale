@@ -137,6 +137,10 @@ pub struct EnginePlan {
     pub tile: Option<u32>,
     /// Bundled-model directory (resources/models).
     pub models_dir: String,
+    /// Models downloaded on demand (CodeFormer: `ondemand` in
+    /// third_party/manifest.toml), in the app's data folder.
+    #[serde(default)]
+    pub downloads_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

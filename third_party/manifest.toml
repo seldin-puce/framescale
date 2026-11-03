@@ -167,10 +167,10 @@ dest    = "yunet"
 # CodeFormer face restoration (© 2022 S-Lab, NTU), ncnn conversion by
 # FeiGeChuanShu/CodeFormer-ncnn (that repo states no license of its own).
 # S-Lab License 1.0: use and redistribution for NON-COMMERCIAL purposes only,
-# with the notice kept: its LICENSE ships in models/codeformer/. FrameScale is
-# distributed non-commercially (decision D10, docs/architecture/phase-1.md);
-# a commercial redistribution must drop models/codeformer or license it from
-# S-Lab. About 189 MB.
+# with the notice kept. Not OSI-approved, so it isn't in the installers
+# (`ondemand`): the app downloads these files from the pinned URLs, verified,
+# the first time the user turns Face Fix on, after showing the license (D10,
+# docs/architecture/phase-1.md). About 189 MB.
 [[models]]
 id      = "codeformer"
 license = "S-Lab-1.0 (non-commercial)"
@@ -178,6 +178,8 @@ url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0f
 sha256  = "5478ad3d579ac916a27337b8deeec642f254fb812995910bbf3916c3de6cc442"
 file    = "encoder.param"
 dest    = "codeformer"
+ondemand = true
+size    = 24390
 
 [[models]]
 id      = "codeformer"
@@ -186,6 +188,8 @@ url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0f
 sha256  = "15a5b7b73a22ab0f54f9270c88367c53e568dc3f46e532fabb0028845b7876ff"
 file    = "encoder.bin"
 dest    = "codeformer"
+ondemand = true
+size    = 98692392
 
 [[models]]
 id      = "codeformer"
@@ -194,6 +198,8 @@ url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0f
 sha256  = "c734a59ff6002b97f8e5efcc06965c17cc543b0957b28187f947986ec35a1d6c"
 file    = "generator.param"
 dest    = "codeformer"
+ondemand = true
+size    = 23689
 
 [[models]]
 id      = "codeformer"
@@ -202,6 +208,8 @@ url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0f
 sha256  = "34af3c500aa6912597867d1bd1bc2f4c98c7f9ad82fa39c045047b48989b9b3c"
 file    = "generator.bin"
 dest    = "codeformer"
+ondemand = true
+size    = 90057160
 
 [[models]]
 id      = "codeformer"
@@ -210,6 +218,8 @@ url     = "https://raw.githubusercontent.com/sczhou/CodeFormer/b33cc7d639d6545bf
 sha256  = "cfd654022bdc44fdd809670d50239bcb1ebf2f4a661dca7e328f93c269538246"
 file    = "LICENSE"
 dest    = "codeformer"
+ondemand = true
+size    = 1717
 
 [[models]]
 id      = "rife"

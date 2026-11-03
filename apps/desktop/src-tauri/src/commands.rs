@@ -128,6 +128,7 @@ pub async fn probe_media(state: S<'_>, paths: Vec<String>) -> R<Vec<ProbeResult>
 pub fn enqueue_jobs(state: S<'_>, mut specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     for spec in &specs {
         validate_pipeline(&spec.pipeline)?;
+        models_ready(&state, &spec.pipeline)?;
         if let Some(why) = spec.output.problem() {
             return Err(err("invalidOutput", why));
         }
@@ -183,6 +184,79 @@ fn validate_pipeline(pipeline: &fs_types::PipelineSpec) -> R<()> {
         .map_err(|e| err("invalidPipeline", format!("{e:?}")))
 }
 
+/// Face Fix needs CodeFormer, which the user downloads on first use.
+fn models_ready(state: &AppState, pipeline: &fs_types::PipelineSpec) -> R<()> {
+    let face_fix = pipeline
+        .stages
+        .iter()
+        .any(|s| matches!(s, fs_types::StageConfig::FaceFix { .. }));
+    if face_fix
+        && !crate::downloads::status(&state.paths.downloads, "codeformer")
+            .is_ok_and(|s| s.installed)
+    {
+        return Err(err(
+            "modelMissing",
+            "Face Fix needs the CodeFormer model: turn Face Fix off and on to download it",
+        ));
+    }
+    Ok(())
+}
+
+/// Is an on-demand model (CodeFormer) downloaded? Also its size and license.
+#[tauri::command]
+pub fn model_status(state: S<'_>, id: String) -> R<fs_types::ModelStatus> {
+    crate::downloads::status(&state.paths.downloads, &id).map_err(|e| err("modelStatus", e))
+}
+
+/// Download an on-demand model the user agreed to (verified against the
+/// pinned SHA-256). One download at a time; `cancel_model_download` stops it.
+#[tauri::command]
+pub async fn download_model(
+    state: S<'_>,
+    id: String,
+    on_progress: Channel<fs_types::DownloadProgress>,
+) -> R<()> {
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut slot = state
+            .model_download
+            .lock()
+            .map_err(|_| err("download", "internal lock poisoned"))?;
+        if slot.is_some() {
+            return Err(err("download", "a model is already downloading"));
+        }
+        *slot = Some(cancel.clone());
+    }
+    tracing::info!(%id, "downloading model");
+    let result = crate::downloads::download(&state.paths.downloads, &id, &cancel, |p| {
+        let _ = on_progress.send(p);
+    })
+    .await;
+    if let Ok(mut slot) = state.model_download.lock() {
+        *slot = None;
+    }
+    match &result {
+        Ok(()) => tracing::info!(%id, "model downloaded"),
+        Err(e) => tracing::warn!(%id, error = %e, "model download failed"),
+    }
+    result.map_err(|e| {
+        if e == "cancelled" {
+            err("cancelled", e)
+        } else {
+            err("download", e)
+        }
+    })
+}
+
+#[tauri::command]
+pub fn cancel_model_download(state: S<'_>) {
+    if let Ok(slot) = state.model_download.lock()
+        && let Some(c) = slot.as_ref()
+    {
+        c.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Resolves once a newer preview (or `cancel_preview`) has replaced `epoch`.
 async fn preview_superseded(state: &AppState, epoch: u64) {
     loop {
@@ -216,6 +290,7 @@ pub async fn render_preview(
     on_progress: Channel<fs_types::PreviewProgress>,
 ) -> R<fs_types::PreviewResult> {
     validate_pipeline(&pipeline)?;
+    models_ready(&state, &pipeline)?;
     let epoch = state.preview_epoch.fetch_add(1, Ordering::SeqCst) + 1;
     state.preview_cancel.notify_waiters();
     let tools = fs_core::preview::PreviewTools {
@@ -223,6 +298,7 @@ pub async fn render_preview(
         ffprobe: state.paths.ffprobe.clone(),
         worker: state.paths.worker.clone(),
         models_dir: state.paths.models.clone(),
+        downloads_dir: Some(state.paths.downloads.clone()),
         device: state.selected_device(),
     };
     fs_core::preview::prune(&state.paths.previews, 6);

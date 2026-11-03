@@ -23,6 +23,7 @@ export function StageInspector() {
   const s = useApp((st) => st.stages[kind]);
   const setStage = useApp((st) => st.setStage);
   const set = (patch: Partial<StageState>) => setStage(kind, patch);
+  const faceReady = useApp((st) => st.faceModel.status?.installed ?? false);
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -94,7 +95,8 @@ export function StageInspector() {
           </Field>
         </>
       )}
-      {kind === "faceFix" && (
+      {kind === "faceFix" && <FaceModelPanel />}
+      {kind === "faceFix" && faceReady && (
         <>
           <Field label={`Fidelity · ${s.fidelity.toFixed(2)}`}>
             <input type="range" min={0} max={1} step={0.05} value={s.fidelity} onChange={(e) => set({ fidelity: Number(e.target.value) })}
@@ -111,6 +113,55 @@ export function StageInspector() {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+const mb = (bytes: number) => Math.round(bytes / 1_000_000);
+
+/** CodeFormer isn't in the installer (non-commercial license): ask, then download it once. */
+function FaceModelPanel() {
+  const { status, progress, error } = useApp((s) => s.faceModel);
+  const download = useApp((s) => s.downloadFaceModel);
+  const cancel = useApp((s) => s.cancelFaceModelDownload);
+  if (status?.installed) return null;
+  const size = status ? `${mb(status.bytes)} MB` : "about 190 MB";
+  const licenseUrl = status?.licenseUrl || LINKS.codeformer;
+  const pct = progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : 0;
+  return (
+    <div className="flex flex-col gap-2 rounded-sm bg-white/4 p-2.5 ring-1 ring-border">
+      <p className="text-[11px] leading-snug text-fg-muted">
+        Face Fix uses <b className="text-fg">CodeFormer</b>, a separate {size} download. It's © S-Lab, NTU and free for{" "}
+        <b className="text-fg">non-commercial use only</b> (S-Lab License 1.0), so it isn't part of the installer. It downloads
+        once from GitHub and is checked against its published checksum.{" "}
+        <button type="button" onClick={() => void backend.openExternal(licenseUrl)} className="inline-flex items-center gap-0.5 text-accent hover:text-accent-hover">
+          License <ExternalLink className="size-2.5" />
+        </button>
+      </p>
+      {progress ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
+            <div className="h-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-fg-subtle tabular">
+            <span>
+              Downloading · {mb(progress.done)} / {mb(progress.total)} MB
+            </span>
+            <button type="button" onClick={cancel} className="text-fg-muted hover:text-fg">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void download()}
+          className="self-start rounded-sm bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accent-hover"
+        >
+          {error ? "Try again" : `Download CodeFormer (${size})`}
+        </button>
+      )}
+      {error && <p className="text-[10px] leading-snug text-err">{error}</p>}
     </div>
   );
 }

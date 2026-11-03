@@ -27,6 +27,13 @@ fn plan(stages: Vec<StageConfig>, models: &std::path::Path) -> EnginePlan {
         device: None,
         tile: None,
         models_dir: models.to_string_lossy().into(),
+        // On-demand models (CodeFormer): `cargo xtask models` puts them here.
+        downloads_dir: Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/ondemand-models")
+                .to_string_lossy()
+                .into(),
+        ),
     }
 }
 
@@ -594,7 +601,7 @@ fn region_diff(a: &Frame, b: &Frame, (x0, y0, x1, y1): (u32, u32, u32, u32)) -> 
     s / ((x1 - x0) * (y1 - y0) * 3) as f32
 }
 
-/// Face Fix with the bundled CodeFormer. Always: it loads, and a frame with
+/// Face Fix with CodeFormer (on demand: target/ondemand-models). Always: it loads, and a frame with
 /// no faces passes through bit-identical. With a real photo (`FS_FACE_IMAGE`;
 /// one frontal face around x 150–330, y 40–230 in the 600×337 test still):
 /// the face is restored, colours are kept, the background stays

@@ -35,6 +35,8 @@ pub struct PlanInputs<'a> {
     pub ffmpeg: &'a str,
     pub segment_dir: &'a str,
     pub models_dir: &'a str,
+    /// Models downloaded on demand (see `EnginePlan::downloads_dir`).
+    pub downloads_dir: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +201,7 @@ pub fn compile(i: &PlanInputs<'_>) -> Result<Planned, PlanError> {
             device: i.device.map(|d| d.uuid),
             tile: None,
             models_dir,
+            downloads_dir: i.downloads_dir.map(str::to_owned),
         },
         total_frames,
         segment_frames: rate::segment_frames(conform, SEGMENT_SECONDS),
@@ -301,6 +304,7 @@ mod tests {
             ffmpeg: "ffmpeg",
             segment_dir: "/tmp/seg",
             models_dir: "/models",
+            downloads_dir: None,
         })
         .expect("plan")
         .plan;

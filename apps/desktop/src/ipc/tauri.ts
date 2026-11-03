@@ -1,4 +1,4 @@
-import type { JobEvent, PreviewProgress, Telemetry } from "@framescale/ipc-types";
+import type { DownloadProgress, JobEvent, PreviewProgress, Telemetry } from "@framescale/ipc-types";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -29,6 +29,13 @@ export const tauriBackend: Backend = {
     return invoke("render_preview", { path, atS, seconds, pipeline, onProgress: channel });
   },
   cancelPreview: () => invoke("cancel_preview"),
+  modelStatus: (id) => invoke("model_status", { id }),
+  downloadModel(id, onProgress) {
+    const channel = new Channel<DownloadProgress>();
+    if (onProgress) channel.onmessage = onProgress;
+    return invoke("download_model", { id, onProgress: channel });
+  },
+  cancelModelDownload: () => invoke("cancel_model_download"),
   thumbnail: (path) => invoke("thumbnail", { path }),
   // Custom protocols are `scheme://localhost/…` on macOS/Linux and
   // `http://scheme.localhost/…` on Windows (WebView2).

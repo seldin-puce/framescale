@@ -1,6 +1,7 @@
 import type {
   CompareInfo,
   DeviceUuid,
+  DownloadProgress,
   EcoMode,
   GpuDevice,
   JobEvent,
@@ -8,6 +9,7 @@ import type {
   JobSpec,
   JobSummary,
   MediaInfo,
+  ModelStatus,
   PauseMode,
   PipelineSpec,
   PreviewProgress,
@@ -72,6 +74,11 @@ export interface Backend {
   ): Promise<PreviewResult>;
   /** Stop the running preview; its promise rejects with code "cancelled". */
   cancelPreview(): Promise<void>;
+  /** A model downloaded on first use (CodeFormer): installed?, size, license. */
+  modelStatus(id: string): Promise<ModelStatus>;
+  /** Download it (the user agreed); rejects with code "cancelled" when stopped. */
+  downloadModel(id: string, onProgress?: (p: DownloadProgress) => void): Promise<void>;
+  cancelModelDownload(): Promise<void>;
   /** Cached JPEG thumbnail; resolves to an `fs://` path for `assetUrl`. */
   thumbnail(path: string): Promise<string>;
   /** URL for an `fs://` path (preview frames, thumbnails). */

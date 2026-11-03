@@ -224,6 +224,11 @@ export function createDemoBackend(): Backend {
       return fail("demo", "Previews run the real engine. Open FrameScale as the desktop app to render one.");
     },
     async cancelPreview() {},
+    async modelStatus(id) {
+      return { id, installed: true, bytes: 188_799_348, license: "S-Lab-1.0 (non-commercial)", licenseUrl: "" };
+    },
+    async downloadModel() {},
+    async cancelModelDownload() {},
     async thumbnail() {
       return "";
     },

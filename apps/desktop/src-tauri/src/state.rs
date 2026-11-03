@@ -50,6 +50,8 @@ pub struct AppState {
     pub preview_epoch: AtomicU64,
     /// Wakes the running preview when `preview_epoch` moves on.
     pub preview_cancel: Notify,
+    /// The running on-demand model download's cancel flag.
+    pub model_download: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
     pub job_events: broadcast::Sender<JobEvent>,
     pub telemetry: watch::Sender<Telemetry>,
 }
@@ -103,6 +105,7 @@ impl AppState {
             compare: Mutex::new(std::collections::VecDeque::new()),
             preview_epoch: AtomicU64::new(0),
             preview_cancel: Notify::new(),
+            model_download: Mutex::new(None),
             job_events,
             telemetry,
         }))

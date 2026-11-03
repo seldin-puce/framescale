@@ -79,6 +79,14 @@ pub struct Model {
     #[serde(default)]
     pub convert: Option<String>,
     pub dest: String,
+    /// Not bundled: the app downloads it when the user first needs it (its
+    /// license isn't OSI-approved, so installers stay all open source).
+    /// `cargo xtask models` puts it in `target/ondemand-models/<dest>/` for
+    /// tests and tools. Needs `file` and `size` (bytes, for the progress bar).
+    #[serde(default)]
+    pub ondemand: bool,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 impl Manifest {

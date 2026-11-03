@@ -64,6 +64,7 @@ async fn full_job_with_hard_pause_and_resume() {
         // The real bundled models: this job runs actual Real-ESRGAN inference.
         models_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/models"),
+        downloads_dir: None,
         encoders: EncoderEnv {
             os: Os::current(),
             vendor: None,

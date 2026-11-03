@@ -7,6 +7,8 @@ import type {
   JobSpec,
   JobSummary,
   MediaInfo,
+  ModelStatus,
+  DownloadProgress,
   PreviewProgress,
   PreviewResult,
   StageConfig,
@@ -73,6 +75,17 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
     { id: "rife-v4.6", label: "RIFE 4.6 (classic)" },
   ],
 };
+
+/** On-demand model id of Face Fix's CodeFormer (third_party/manifest.toml). */
+export const FACE_MODEL = "codeformer";
+
+export interface FaceModelState {
+  /** Null until the first check. */
+  status: ModelStatus | null;
+  /** Set while downloading. */
+  progress: DownloadProgress | null;
+  error: string | null;
+}
 
 const defaults = (enabled: boolean, model: string): StageState => ({
   enabled,
@@ -207,6 +220,8 @@ interface AppStore {
   autoplay: JobId | null;
   toast: { kind: "error" | "info"; message: string } | null;
   preview: PreviewState;
+  /** CodeFormer (Face Fix) isn't in the installer: downloaded on first use. */
+  faceModel: FaceModelState;
 
   init(): Promise<void>;
   renderPreview(atS: number): Promise<void>;
@@ -218,7 +233,11 @@ interface AppStore {
   renderAll(): Promise<void>;
   select(id: string | null): void;
   setStage(kind: StageKind, patch: Partial<StageState>): void;
+  /** The stage's on/off switch. Face Fix needs CodeFormer downloaded first. */
+  toggleStage(kind: StageKind): void;
   selectStage(kind: StageKind): void;
+  downloadFaceModel(): Promise<void>;
+  cancelFaceModelDownload(): void;
   setOutput(patch: Partial<OutputState>): void;
   setEco(mode: EcoMode): Promise<void>;
   setCompareMode(m: CompareMode): void;
@@ -266,6 +285,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   autoplay: null,
   toast: null,
   preview: { status: "idle", path: null, result: null, error: null, refining: false, run: null },
+  faceModel: { status: null, progress: null, error: null },
 
   selectedSource() {
     const { selected, drafts, jobs } = get();
@@ -320,6 +340,10 @@ export const useApp = create<AppStore>()((set, get) => ({
   async init() {
     const jobs = await backend.listJobs();
     set({ jobs: Object.fromEntries(jobs.map((j) => [j.id, j])) });
+    void backend
+      .modelStatus(FACE_MODEL)
+      .then((status) => set((s) => ({ faceModel: { ...s.faceModel, status } })))
+      .catch(() => {});
     // Hardware discovery runs in the background on the Rust side; poll until ready.
     const poll = async () => {
       const hw = await backend.hardwareInfo();
@@ -392,6 +416,35 @@ export const useApp = create<AppStore>()((set, get) => ({
   select: (id) => set({ selected: id }),
   setStage: (kind, patch) => set((s) => ({ stages: { ...s.stages, [kind]: { ...s.stages[kind], ...patch } } })),
   selectStage: (kind) => set({ selectedStage: kind }),
+  toggleStage: (kind) => {
+    const s = get().stages[kind];
+    // Face Fix without CodeFormer: show its download panel instead.
+    if (kind === "faceFix" && !s.enabled && !get().faceModel.status?.installed) {
+      set({ selectedStage: kind });
+      return;
+    }
+    get().setStage(kind, { enabled: !s.enabled });
+  },
+
+  async downloadFaceModel() {
+    if (get().faceModel.progress) return;
+    const start: DownloadProgress = { done: 0, total: get().faceModel.status?.bytes ?? 0 };
+    set((s) => ({ faceModel: { ...s.faceModel, progress: start, error: null } }));
+    try {
+      await backend.downloadModel(FACE_MODEL, (progress) => set((s) => ({ faceModel: { ...s.faceModel, progress } })));
+      const status = await backend.modelStatus(FACE_MODEL);
+      set((s) => ({
+        faceModel: { status, progress: null, error: null },
+        stages: status.installed ? { ...s.stages, faceFix: { ...s.stages.faceFix, enabled: true } } : s.stages,
+      }));
+    } catch (e) {
+      const cancelled = isCmdError(e) && e.code === "cancelled";
+      const message = isCmdError(e) ? e.message : String(e);
+      set((s) => ({ faceModel: { ...s.faceModel, progress: null, error: cancelled ? null : message } }));
+    }
+  },
+
+  cancelFaceModelDownload: () => void backend.cancelModelDownload(),
   setOutput: (patch) =>
     set((s) => {
       const next = { ...s.output, ...patch };

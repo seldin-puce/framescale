@@ -53,7 +53,7 @@ macOS), and uses [FFmpeg](https://ffmpeg.org) for decoding and encoding.
 | **Deinterlace** | Motion-adaptive BWDIF, at the same or double frame rate. |
 | **Denoise** | NAFNet for camera noise in live action; Real-CUGAN for anime and line art. Four strength levels. |
 | **Upscale** | ×2 or ×4 with Real-ESRGAN models for live action and anime. General v3 (the default) is fast and has a noise-removal slider; x4+ is the heaviest, and runs its ×2 sibling at ×2. |
-| **Face Fix** | Finds faces (YuNet) and restores them with CodeFormer, with a fidelity slider. |
+| **Face Fix** | Finds faces (YuNet) and restores them with CodeFormer, with a fidelity slider. CodeFormer (189 MB, non-commercial license) isn't in the installer: the app downloads it the first time you turn Face Fix on. |
 | **Interpolate** | ×2, ×3 or ×4 frame rate with RIFE. Frames are held, not morphed, across detected scene cuts. |
 
 **Workflow**
@@ -380,9 +380,10 @@ Real-ESRGAN BSD-3-Clause, NAFNet, Real-CUGAN, RIFE and YuNet MIT, …). See
 
 > [!IMPORTANT]
 > **Face Fix uses CodeFormer, whose weights are licensed for non-commercial use
-> only** (S-Lab License 1.0). The GPL doesn't extend to them. Anyone who
-> redistributes FrameScale commercially must remove `models/codeformer/` or
-> obtain a license from S-Lab.
+> only** (S-Lab License 1.0). The GPL doesn't extend to them. They aren't in
+> the installers, which are entirely open source: the app downloads them from
+> their original source when you first turn Face Fix on, after showing the
+> license.
 
 ## Acknowledgements
 

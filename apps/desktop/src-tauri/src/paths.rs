@@ -10,6 +10,8 @@ pub struct Paths {
     pub ffprobe: PathBuf,
     pub worker: PathBuf,
     pub models: PathBuf,
+    /// Models downloaded on demand (CodeFormer), `<app data>/models`.
+    pub downloads: PathBuf,
     pub journal: PathBuf,
     pub ledger: PathBuf,
     pub settings: PathBuf,
@@ -39,6 +41,7 @@ impl Paths {
             ffprobe: sidecar("ffprobe"),
             worker: sidecar("fs-worker"),
             models: resources.join("models"),
+            downloads: data.join("models"),
             journal: data.join("journal.sqlite3"),
             ledger: data.join("workers.jsonl"),
             settings: data.join("settings.json"),

@@ -360,14 +360,26 @@ struct FaceFix {
 }
 
 impl FaceFix {
+    /// YuNet is bundled; CodeFormer is downloaded on demand into `downloads`
+    /// (its license isn't OSI-approved), with `models` as a fallback.
     fn load(
         models: &Path,
+        downloads: Option<&Path>,
         fidelity: f32,
         device: &DeviceSel,
         threads: i32,
     ) -> Result<Self, EngineError> {
         let yunet = models.join("yunet");
-        let dir = models.join("codeformer");
+        let dir = downloads
+            .map(|d| d.join("codeformer"))
+            .filter(|d| d.join("generator.bin").exists())
+            .unwrap_or_else(|| models.join("codeformer"));
+        if !dir.join("generator.bin").exists() {
+            return Err(EngineError::ModelNotFound(
+                "CodeFormer isn't downloaded yet: turn Face Fix on in FrameScale to download it"
+                    .into(),
+            ));
+        }
         let detector = load(
             device,
             threads,
@@ -625,6 +637,7 @@ fn load(
 impl NcnnBackend {
     pub fn new(plan: &EnginePlan, device: DeviceSel, threads: i32) -> Result<Self, EngineError> {
         let models = Path::new(&plan.models_dir);
+        let downloads = plan.downloads_dir.as_deref().map(Path::new);
         // CPU without ncnn-internal threading: single-threaded models, one tile
         // per core. FS_CPU_TILE_WORKERS forces it (benchmarks, any platform).
         let forced = std::env::var("FS_CPU_TILE_WORKERS")
@@ -688,7 +701,9 @@ impl NcnnBackend {
                             model.id
                         )));
                     }
-                    face_fix = Some(FaceFix::load(models, *fidelity, &device, threads)?);
+                    face_fix = Some(FaceFix::load(
+                        models, downloads, *fidelity, &device, threads,
+                    )?);
                 }
                 StageConfig::Upscale {
                     model,

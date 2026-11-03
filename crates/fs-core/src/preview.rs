@@ -25,6 +25,8 @@ pub struct PreviewTools {
     pub ffprobe: PathBuf,
     pub worker: PathBuf,
     pub models_dir: PathBuf,
+    /// Models downloaded on demand (CodeFormer).
+    pub downloads_dir: Option<PathBuf>,
     pub device: Option<GpuDevice>,
 }
 
@@ -104,6 +106,7 @@ pub async fn render(
         ffmpeg: &tools.ffmpeg.to_string_lossy(),
         segment_dir: &out_dir.to_string_lossy(),
         models_dir: &tools.models_dir.to_string_lossy(),
+        downloads_dir: tools.downloads_dir.as_deref().and_then(|p| p.to_str()),
     })
     .map_err(|e| e.to_string())?
     .plan;

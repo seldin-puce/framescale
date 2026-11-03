@@ -93,6 +93,10 @@ fn main() {
         device: None,
         tile: None,
         models_dir: models.to_string_lossy().into(),
+        // CodeFormer (on demand): FS_DOWNLOADS or where `cargo xtask models` puts it.
+        downloads_dir: Some(std::env::var("FS_DOWNLOADS").unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/ondemand-models").into()
+        })),
     };
     // One frame, or several back to back (raw video): models load once.
     let data = std::fs::read(&a[1]).expect("read input");

@@ -18,7 +18,7 @@ export function PipelineChain() {
   const stages = useApp((s) => s.stages);
   const selectedStage = useApp((s) => s.selectedStage);
   const selectStage = useApp((s) => s.selectStage);
-  const setStage = useApp((s) => s.setStage);
+  const toggleStage = useApp((s) => s.toggleStage);
 
   return (
     <ol className="flex flex-col" aria-label="Processing pipeline">
@@ -75,7 +75,7 @@ export function PipelineChain() {
                     aria-checked={s.enabled}
                     aria-label={`${meta.label} ${s.enabled ? "on" : "off"}`}
                     onClick={() => {
-                      setStage(kind, { enabled: !s.enabled });
+                      toggleStage(kind);
                       selectStage(kind);
                     }}
                     className={cn(

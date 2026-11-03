@@ -44,14 +44,14 @@ own licenses apply to those components. This file ships inside the application b
 
 ### CodeFormer is for non-commercial use only
 
-CodeFormer is the one bundled component that is not freely licensed. Its
-weights, and the ncnn conversion of them in `models/codeformer/`, may be used
-and redistributed for non-commercial purposes only. FrameScale AI is
-distributed non-commercially. The GPL covers FrameScale's own code, not these
-weights: anyone who redistributes FrameScale commercially must remove
-`models/codeformer/` or obtain a license from S-Lab. The conversion repository
-states no license of its own. The license also ships as
-`models/codeformer/LICENSE`:
+CodeFormer is the one component that is not freely licensed, so it is **not
+part of the installers**. When the user first turns Face Fix on, the app shows
+this license and, if they agree, downloads the weights (the ncnn conversion)
+from their original repositories, pinned by URL and SHA-256 in
+`third_party/manifest.toml`, into its data folder (`models/codeformer/`, with
+the license as `LICENSE`). They may be used for non-commercial purposes only.
+The GPL covers FrameScale's own code, not these weights. The conversion
+repository states no license of its own. The license:
 
 ```text
 S-Lab License 1.0

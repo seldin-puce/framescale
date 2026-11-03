@@ -6,6 +6,7 @@
 #![deny(unsafe_code)]
 
 mod commands;
+mod downloads;
 mod paths;
 mod protocol;
 mod queue;
@@ -92,6 +93,9 @@ pub fn run() {
             commands::source_open,
             commands::cancel_preview,
             commands::compare_close,
+            commands::model_status,
+            commands::download_model,
+            commands::cancel_model_download,
             commands::subscribe_jobs,
             commands::subscribe_telemetry,
         ])

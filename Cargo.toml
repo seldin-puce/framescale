@@ -77,7 +77,10 @@ fs4      = "1.1.0"
 nix         = { version = "0.31.3", features = ["signal", "process", "fs"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 
-# --- xtask only ---------------------------------------------------------------
+# --- on-demand model downloads (app) and xtask -----------------------------------
+# reqwest/rustls as tauri-plugin-updater already pulls them in (ring provider).
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls  = { version = "0.23", default-features = false, features = ["ring"] }
 sha2    = "0.11.1"   # SHA-256 verification of pinned downloads
 clap    = { version = "4.6.7", features = ["derive"] }
 toml    = "1.1.8"

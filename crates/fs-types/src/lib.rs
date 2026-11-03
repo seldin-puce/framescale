@@ -9,6 +9,7 @@
 pub mod device;
 pub mod job;
 pub mod media;
+pub mod models;
 pub mod pipeline;
 pub mod preview;
 pub mod telemetry;
@@ -22,6 +23,7 @@ pub use media::{
     AnalysisReport, ColorPrimaries, ColorProfile, ColorRange, ContentLightLevel, FieldOrder,
     MasteringDisplay, MatrixCoefficients, MediaInfo, Rational, TransferCharacteristic, VideoStream,
 };
+pub use models::{DownloadProgress, ModelStatus};
 pub use pipeline::{
     Container, EncoderPreference, JobSpec, ModelRef, OutputSpec, PipelineError, PipelineSpec,
     StageConfig, StageKind, VideoCodec,

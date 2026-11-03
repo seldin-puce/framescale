@@ -35,6 +35,8 @@ pub struct Services {
     /// Temp root; each job gets `<work_root>/<job-id>/`.
     pub work_root: PathBuf,
     pub models_dir: PathBuf,
+    /// Models downloaded on demand (CodeFormer).
+    pub downloads_dir: Option<PathBuf>,
     pub encoders: EncoderEnv,
     pub device: Option<GpuDevice>,
     pub ledger: Arc<Ledger>,
@@ -281,6 +283,7 @@ async fn run_inner(ctx: &mut Ctx<'_>) -> Result<JobState, String> {
                 ffmpeg: &ctx.svc.ffmpeg.to_string_lossy(),
                 segment_dir: &segment_dir,
                 models_dir: &ctx.svc.models_dir.to_string_lossy(),
+                downloads_dir: ctx.svc.downloads_dir.as_deref().and_then(|p| p.to_str()),
             })
             .map_err(|e| e.to_string())?;
             for (code, msg) in planned.warnings {
