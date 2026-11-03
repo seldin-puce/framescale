@@ -63,6 +63,8 @@ bring-your-own only.
 
 ## Supporting the project
 
-FrameScale stays fully featured for everyone. If it saves you time, donations
-via GitHub Sponsors or Ko-fi fund GPU test hardware and new model support.
-They never unlock anything.
+FrameScale stays fully featured for everyone. If it saves you time, a tip
+helps fund GPU test hardware (NVIDIA, AMD, Intel, Apple) and new model
+support. Donations never unlock anything.
+
+<a href='https://ko-fi.com/A4P429YUDG' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>

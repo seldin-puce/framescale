@@ -63,6 +63,8 @@ export interface Backend {
   thumbnail(path: string): Promise<string>;
   /** URL for an `fs://` path (preview frames, thumbnails). */
   assetUrl(rel: string): string;
+  /** Open an external link in the system browser (Ko-fi / GitHub only). */
+  openExternal(url: string): Promise<void>;
   subscribeJobs(cb: (e: JobEvent) => void): Promise<Unsubscribe>;
   subscribeTelemetry(cb: (t: Telemetry) => void): Promise<Unsubscribe>;
   pickFiles(): Promise<string[]>;

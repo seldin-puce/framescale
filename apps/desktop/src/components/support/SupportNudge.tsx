@@ -1,5 +1,7 @@
 import { Coffee, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { backend } from "@/ipc";
+import { LINKS } from "@/lib/links";
 import { useApp } from "@/stores/app";
 
 /**
@@ -25,16 +27,30 @@ export function SupportNudge() {
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-fg">Render finished. Enjoying FrameScale?</p>
               <p className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">It's free and open source. Tips help fund GPU testing.</p>
-              <button
-                type="button"
-                onClick={() => {
-                  dismiss();
-                  openAbout(true);
-                }}
-                className="mt-2 text-[11px] font-semibold text-accent hover:text-accent-hover"
-              >
-                Support the project →
-              </button>
+              <div className="mt-2 flex items-center gap-3">
+                {LINKS.kofi && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dismiss();
+                      void backend.openExternal(LINKS.kofi);
+                    }}
+                    className="rounded-sm bg-[#ff5e5b] px-2 py-1 text-[11px] font-semibold text-white hover:brightness-110"
+                  >
+                    Buy me a coffee
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismiss();
+                    openAbout(true);
+                  }}
+                  className="text-[11px] font-semibold text-fg-muted hover:text-fg"
+                >
+                  About
+                </button>
+              </div>
             </div>
             <button type="button" aria-label="Dismiss" onClick={dismiss} className="text-fg-subtle hover:text-fg">
               <X className="size-3.5" />

@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Least-privilege grants for the main window. The shell plugin is intentionally absent: sidecars are spawned from Rust only.",
-  "windows": ["main"],
+  "description": "Least-privilege grants for the main window. The shell plugin is intentionally absent: sidecars are spawned from Rust only. External links are limited to the project's Ko-fi and GitHub pages.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -14,6 +16,17 @@
     "dialog:allow-ask",
     "updater:default",
     "process:allow-restart",
-    "window-state:default"
+    "window-state:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://ko-fi.com/*"
+        },
+        {
+          "url": "https://github.com/*"
+        }
+      ]
+    }
   ]
 }

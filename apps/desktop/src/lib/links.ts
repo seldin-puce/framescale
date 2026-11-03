@@ -9,7 +9,7 @@ export const LINKS = {
   /** GitHub Sponsors page, e.g. "https://github.com/sponsors/<you>". */
   sponsors: "",
   /** Ko-fi page, e.g. "https://ko-fi.com/<you>". */
-  kofi: "",
+  kofi: "https://ko-fi.com/A4P429YUDG",
 } as const;
 
 export const hasDonationLinks = Boolean(LINKS.sponsors || LINKS.kofi);

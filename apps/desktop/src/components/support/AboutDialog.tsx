@@ -1,25 +1,23 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { CodeXml, Coffee, Heart, Scale, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { backend } from "@/ipc";
 import { LINKS, hasDonationLinks } from "@/lib/links";
 import { useApp } from "@/stores/app";
 
 const VERSION = "0.1.0";
 
-function LinkButton({ href, icon: Icon, children, primary }: { href: string; icon: typeof Heart; children: React.ReactNode; primary?: boolean }) {
+/** External link as a button: opened in the system browser via the opener plugin. */
+function LinkButton({ href, icon: Icon, children, color }: { href: string; icon: typeof Heart; children: React.ReactNode; color: string }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className={
-        primary
-          ? "flex flex-1 items-center justify-center gap-1.5 rounded-sm bg-[#db61a2] px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-          : "flex flex-1 items-center justify-center gap-1.5 rounded-sm bg-white/6 px-3 py-2 text-xs font-semibold text-fg ring-1 ring-border-strong transition-colors hover:bg-white/10"
-      }
+    <button
+      type="button"
+      onClick={() => void backend.openExternal(href)}
+      style={{ backgroundColor: color }}
+      className="flex flex-1 items-center justify-center gap-1.5 rounded-sm px-3 py-2 text-xs font-semibold text-white transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
     >
       <Icon className="size-3.5" /> {children}
-    </a>
+    </button>
   );
 }
 
@@ -71,13 +69,13 @@ export function AboutDialog() {
                     </p>
                     <div className="flex gap-2">
                       {LINKS.sponsors && (
-                        <LinkButton href={LINKS.sponsors} icon={Heart} primary>
+                        <LinkButton href={LINKS.sponsors} icon={Heart} color="#bf3989">
                           GitHub Sponsors
                         </LinkButton>
                       )}
                       {LINKS.kofi && (
-                        <LinkButton href={LINKS.kofi} icon={Coffee}>
-                          Ko-fi
+                        <LinkButton href={LINKS.kofi} icon={Coffee} color="#ff5e5b">
+                          Buy me a coffee on Ko-fi
                         </LinkButton>
                       )}
                     </div>
@@ -92,9 +90,13 @@ export function AboutDialog() {
                     {LINKS.repository && (
                       <>
                         {" "}
-                        <a href={LINKS.repository} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:text-accent-hover">
+                        <button
+                          type="button"
+                          onClick={() => void backend.openExternal(LINKS.repository)}
+                          className="inline-flex items-center gap-1 text-accent hover:text-accent-hover"
+                        >
                           <CodeXml className="size-3" /> Source code
-                        </a>
+                        </button>
                       </>
                     )}
                   </p>

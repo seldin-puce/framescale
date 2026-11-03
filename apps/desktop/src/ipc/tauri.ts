@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Backend, HardwareInfo, ProbeResult } from "./backend";
 
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
@@ -69,4 +70,7 @@ export const tauriBackend: Backend = {
   },
 
   showWindow: () => getCurrentWindow().show(),
+  // Tauri webviews don't hand `target="_blank"` links to the OS; the opener
+  // plugin does, restricted to Ko-fi/GitHub by the capability scope.
+  openExternal: (url) => openUrl(url),
 };

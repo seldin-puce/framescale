@@ -227,6 +227,9 @@ export function createDemoBackend(): Backend {
       return "";
     },
     assetUrl: (rel) => rel,
+    async openExternal(url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
     async subscribeJobs(cb) {
       jobSubs.add(cb);
       return () => jobSubs.delete(cb);
