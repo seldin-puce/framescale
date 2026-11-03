@@ -34,7 +34,7 @@ apps/desktop/src-tauri/binaries/
 `cargo xtask sidecars --target <triple>` produces these files:
 
 1. **FFmpeg.**
-   - Windows/Linux: downloads the pinned LGPL build and verifies its SHA-256.
+   - Windows/Linux: downloads the pinned GPL build and verifies its SHA-256.
    - macOS: builds from verified sources (`third_party/ffmpeg/build-macos.sh`).
 2. **License/capability gate.** The build fails on `--enable-gpl` or `--enable-nonfree`, or if a filter or encoder the pipeline needs is missing (`[ffmpeg.gate]` in the manifest).
 3. **fs-worker.** Builds `fs-worker` for the target in release mode.
@@ -56,7 +56,10 @@ of everything GPL inside it:
   `autobuild-2026-11-02-12-51` (its scripts pin every dependency). For macOS
   it's the tarballs listed under `[ffmpeg.source]` in `third_party/manifest.toml`.
 - Attaching the archives beats a written offer: it's simpler and lasts as long
-  as the release does.
+  as the release does. The release workflow does this automatically: its
+  `gpl-sources` job attaches `ffmpeg-gpl-sources.tar` (built from
+  `[ffmpeg.gpl_source]` and `[ffmpeg.source]` in the manifest) to every draft
+  release.
 
 ## Third-party pinning
 
@@ -67,7 +70,16 @@ of everything GPL inside it:
 
 ## Release (tag `vX.Y.Z`)
 
-`.github/workflows/release.yml` builds Linux (on Ubuntu 22.04, for the glibc baseline), Windows, and macOS arm64 + x86_64. It signs everything, notarizes the macOS builds, and creates a **draft** GitHub release with `latest.json` for the updater.
+`.github/workflows/release.yml` builds Linux (on Ubuntu 22.04, for the glibc baseline), Windows, and macOS arm64 + x86_64, and creates a **draft** GitHub release with every installer. Review it, then publish.
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Every secret below is optional; each one switches on a step:
+
+- **No signing secrets:** the release still builds. Windows installers are unsigned (SmartScreen warns on first run). macOS apps are ad-hoc signed, without hardened runtime or notarization (Gatekeeper asks users to confirm). The README's install notes cover both.
+- **No `TAURI_SIGNING_PRIVATE_KEY`:** no updater artifacts and no `latest.json`. Before enabling the updater, generate a key pair (`pnpm tauri signer generate`), put the public key in `plugins.updater.pubkey`, point `plugins.updater.endpoints` at `https://github.com/<owner>/<repo>/releases/latest/download/latest.json`, and keep the private key backed up: losing it means installed apps can't verify future updates.
 
 ### Secrets
 

@@ -17,7 +17,8 @@ on your own GPU.**
 [Features](#features) ·
 [Models](#models) ·
 [Performance](#performance) ·
-[Building from source](#building-from-source) ·
+[Download](#download) ·
+[Build from source](#build-from-source) ·
 [Architecture](#architecture) ·
 [Support](#support-the-project) ·
 [License](#license)
@@ -38,9 +39,9 @@ networks through [ncnn](https://github.com/Tencent/ncnn) on Vulkan (MoltenVK on
 macOS), and uses [FFmpeg](https://ffmpeg.org) for decoding and encoding.
 
 > [!NOTE]
-> FrameScale AI is in active development (v0.1). There are no binary releases
-> yet, so [build it from source](#building-from-source). Linux is the most
-> tested platform; Windows and macOS builds are set up in CI.
+> FrameScale AI is early software (v0.1). Linux is the most tested platform;
+> the Windows and macOS builds come from CI and have seen less real-world use.
+> Bug reports are very welcome.
 
 ## Features
 
@@ -118,50 +119,158 @@ your own hardware.
 More measurements and the engineering notes behind them are in
 [`docs/architecture/phase-3.md`](docs/architecture/phase-3.md).
 
-## System requirements
+## Installation
+
+### System requirements
 
 - **OS:** Windows 10/11 (x64), macOS 12+ (Apple Silicon or Intel), or a recent
   64-bit Linux desktop.
 - **GPU:** any Vulkan-capable NVIDIA, AMD or Intel GPU, or a Mac through
   MoltenVK. More VRAM allows bigger tiles; 4 GB is comfortable. The CPU fallback
-  works everywhere but is much slower.
+  works everywhere but is much slower. Keep your GPU driver up to date.
 - **Disk:** about 1 GB for the app with its models, plus room for your renders.
 
-## Building from source
+### Download
 
-**Prerequisites**
+Ready-made installers are on the **[Releases page](../../releases/latest)**.
+Pick the file for your system:
 
-| Platform | Needs |
+| System | File |
 |---|---|
-| All | [Rust](https://rustup.rs) (the toolchain in `rust-toolchain.toml` installs itself), Node.js ≥ 22.12, [pnpm](https://pnpm.io) 12, `curl` |
-| Linux | A C/C++ toolchain, `libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev patchelf` (Fedora: `webkit2gtk4.1-devel libsoup3-devel librsvg2-devel libappindicator-gtk3-devel`) |
-| macOS | Xcode Command Line Tools; for the FFmpeg source build also `brew install meson ninja nasm autoconf automake libtool pkg-config cmake` |
-| Windows | MSVC Build Tools (C++), WebView2 runtime (preinstalled on Windows 11) |
+| Windows 10/11 (x64) | `…_x64-setup.exe` |
+| macOS, Apple Silicon (M1 and later) | `…_aarch64.dmg` |
+| macOS, Intel | `…_x64.dmg` |
+| Linux, any distribution | `…_amd64.AppImage` |
+| Linux, Debian / Ubuntu | `…_amd64.deb` |
+| Linux, Fedora / openSUSE | `…x86_64.rpm` |
 
-`cargo xtask doctor` checks your setup.
+Each release also carries `ffmpeg-gpl-sources.tar`, the source code of the
+bundled FFmpeg (a GPL requirement). You don't need it to run the app.
 
-**Run it**
+**First run**
+
+<details>
+<summary><b>Windows</b></summary>
+
+Run the `setup.exe`. It installs for your user only and needs no admin rights.
+If Windows SmartScreen says "Windows protected your PC", the installer isn't
+code-signed yet: click **More info → Run anyway**.
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+Open the `.dmg` and drag **FrameScale AI** into **Applications**. Until the app
+is notarized, macOS may say it "can't be opened" or "is damaged". Either open
+**System Settings → Privacy & Security** and click **Open Anyway**, or run once:
 
 ```sh
-git clone <this repository>
+xattr -dr com.apple.quarantine "/Applications/FrameScale AI.app"
+```
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
+```sh
+# AppImage (any distribution)
+chmod +x FrameScale*.AppImage && ./FrameScale*.AppImage
+
+# Debian / Ubuntu
+sudo apt install ./FrameScale*.deb
+
+# Fedora / openSUSE
+sudo dnf install ./FrameScale*.rpm
+```
+
+FrameScale needs a Vulkan driver: Mesa (`mesa-vulkan-drivers`) for AMD and
+Intel, or NVIDIA's proprietary driver.
+</details>
+
+### Build from source
+
+**1. Install the tools**
+
+Everyone needs [Rust](https://rustup.rs) (the exact toolchain in
+`rust-toolchain.toml` installs itself), [Node.js](https://nodejs.org) 22.12 or
+newer, CMake and Git. Then enable pnpm, which Node ships with:
+
+```sh
+corepack enable
+```
+
+Plus, for your system:
+
+<details>
+<summary><b>Debian / Ubuntu</b></summary>
+
+```sh
+sudo apt install build-essential cmake git curl libwebkit2gtk-4.1-dev \
+  libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+```
+</details>
+
+<details>
+<summary><b>Fedora</b></summary>
+
+```sh
+sudo dnf install gcc-c++ cmake git curl webkit2gtk4.1-devel libsoup3-devel \
+  librsvg2-devel libappindicator-gtk3-devel
+```
+
+On Fedora Atomic (Silverblue, Kinoite, Bazzite…), build inside a `toolbox`.
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+```sh
+xcode-select --install
+brew install cmake meson ninja nasm autoconf automake libtool pkg-config
+```
+
+FFmpeg is compiled from source on macOS, which is what the Homebrew tools are for.
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+with the **Desktop development with C++** workload (it includes CMake),
+[Git](https://git-scm.com), Node.js and
+[PowerShell 7](https://aka.ms/powershell). WebView2 comes with Windows 11; on
+Windows 10 the installer fetches it.
+</details>
+
+`cargo xtask doctor` checks that everything is in place.
+
+**2. Get the code and its dependencies**
+
+```sh
+git clone <repository URL> framescale
 cd framescale
 pnpm install
-cargo xtask setup   # verified FFmpeg + fs-worker sidecars, ncnn source, all models
-pnpm dev            # Vite on :1420 + the Tauri app
+cargo xtask setup
+```
+
+`cargo xtask setup` downloads about 1 GB: FFmpeg, the ncnn source and every AI
+model. Each file is checked against its SHA-256 in
+[`third_party/manifest.toml`](third_party/manifest.toml), and models without
+an ncnn export are converted on the spot.
+
+**3. Run or build**
+
+```sh
+pnpm dev     # run the app in development mode
+pnpm build   # build an installer for your system
 ```
 
 The first build compiles ncnn and glslang (about a minute on 12 threads).
-`cargo xtask setup` downloads about 1 GB of pinned artifacts and checks every
-SHA-256.
+Installers land in `target/release/bundle/` (`nsis/`, `dmg/`, `deb/`, `rpm/`,
+`appimage/`).
 
-**Release build**
-
-```sh
-pnpm build          # installers / bundles for the current platform
-```
-
-Signing, notarization, updater keys and the GPL source obligations for binary
-releases are covered in [`docs/build-and-release.md`](docs/build-and-release.md).
+Maintainers: signing, notarization, the updater and publishing releases are
+covered in [`docs/build-and-release.md`](docs/build-and-release.md).
 
 ## Development
 

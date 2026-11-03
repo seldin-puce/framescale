@@ -65,44 +65,136 @@ jobs:
       - name: Sidecars + models (verified, gated)
         run: cargo xtask setup --target ${{ matrix.target }}
 
-      # Azure Artifact Signing (HSM-backed Authenticode). The hook script reads these.
+      # Signing is optional: without certificates the release still builds,
+      # unsigned (macOS ad-hoc). Only the secrets that exist are exported, since
+      # the bundler treats an empty APPLE_CERTIFICATE as "sign with this".
+      - name: Signing and updater setup
+        shell: bash
+        env:
+          S_TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          S_TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          S_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          S_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          S_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          S_APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          S_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          S_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          S_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          S_AZURE_SIGNING_METADATA_JSON: ${{ secrets.AZURE_SIGNING_METADATA_JSON }}
+        run: |
+          put() { # name value: export only when set
+            if [ -n "$2" ]; then
+              { echo "$1<<__FS_EOF__"; echo "$2"; echo "__FS_EOF__"; } >> "$GITHUB_ENV"
+            fi
+          }
+          extra=()
+          # Updater artifacts (minisign) need the private key.
+          if [ -n "$S_TAURI_KEY" ]; then
+            put TAURI_SIGNING_PRIVATE_KEY "$S_TAURI_KEY"
+            put TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$S_TAURI_KEY_PASSWORD"
+            echo "FS_UPDATER=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY not set: building without updater artifacts"
+            extra+=('"createUpdaterArtifacts":false')
+            echo "FS_UPDATER=false" >> "$GITHUB_ENV"
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$S_APPLE_CERTIFICATE" ]; then
+              put APPLE_CERTIFICATE "$S_APPLE_CERTIFICATE"
+              put APPLE_CERTIFICATE_PASSWORD "$S_APPLE_CERTIFICATE_PASSWORD"
+              put APPLE_SIGNING_IDENTITY "$S_APPLE_SIGNING_IDENTITY"
+              if [ -n "$S_APPLE_API_KEY_P8" ]; then
+                printf '%s' "$S_APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+                put APPLE_API_KEY_PATH "$RUNNER_TEMP/AuthKey.p8"
+                put APPLE_API_ISSUER "$S_APPLE_API_ISSUER"
+                put APPLE_API_KEY "$S_APPLE_API_KEY"
+              fi
+            else
+              # Ad-hoc signature (Apple Silicon refuses unsigned code). Hardened
+              # runtime needs a Team ID for library validation, so it's off.
+              echo "::warning::No Apple certificate: building an ad-hoc signed, un-notarized app"
+              extra+=('"macOS":{"signingIdentity":"-","hardenedRuntime":false}')
+            fi
+          fi
+          if [ "$RUNNER_OS" = "Windows" ] && [ -n "$S_AZURE_CLIENT_SECRET" ]; then
+            put AZURE_TENANT_ID "$S_AZURE_TENANT_ID"
+            put AZURE_CLIENT_ID "$S_AZURE_CLIENT_ID"
+            put AZURE_CLIENT_SECRET "$S_AZURE_CLIENT_SECRET"
+            printf '%s' "$S_AZURE_SIGNING_METADATA_JSON" > "$RUNNER_TEMP/metadata.json"
+            put FS_SIGN_METADATA "$RUNNER_TEMP/metadata.json"
+            echo "FS_WINDOWS_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+          if [ ${#extra[@]} -gt 0 ]; then
+            joined=$(IFS=,; echo "${extra[*]}")
+            echo "FS_TAURI_CONFIG=--config '{\"bundle\":{${joined}}}'" >> "$GITHUB_ENV"
+          fi
+
+      # Azure Artifact Signing (HSM-backed Authenticode). sign-windows.ps1
+      # skips signing (with a warning) when these aren't configured.
       - name: Windows signing client
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FS_WINDOWS_SIGNING == 'true'
         shell: pwsh
         run: |
           nuget install Microsoft.ArtifactSigning.Client -Version 1.0.146 -OutputDirectory $env:RUNNER_TEMP\tsc
           $dlib = Get-ChildItem "$env:RUNNER_TEMP\tsc" -Recurse -Filter *.Dlib.dll | Where-Object FullName -like '*x64*' | Select-Object -First 1
           "FS_SIGN_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
-          '${{ secrets.AZURE_SIGNING_METADATA_JSON }}' | Out-File -Encoding utf8 "$env:RUNNER_TEMP\metadata.json"
-          "FS_SIGN_METADATA=$env:RUNNER_TEMP\metadata.json" >> $env:GITHUB_ENV
-
-      - name: macOS notarization key
-        if: runner.os == 'macOS'
-        run: |
-          echo "${{ secrets.APPLE_API_KEY_P8 }}" > "$RUNNER_TEMP/AuthKey.p8"
-          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
       - uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater artifact signatures (minisign)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS: Developer ID signing + notarization via App Store Connect API key
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          # Windows: Azure Artifact Signing service principal
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ env.FS_TAURI_CONFIG }}
           tagName: ${{ github.ref_name }}
           releaseName: FrameScale AI ${{ github.ref_name }}
+          releaseBody: |
+            Downloads are below. Installation and first-run notes: see the README.
+            GPL: the corresponding source of the bundled FFmpeg is attached as ffmpeg-gpl-sources.tar.
           releaseDraft: true
-          includeUpdaterJson: true
+          includeUpdaterJson: ${{ env.FS_UPDATER == 'true' }}
+
+  # GPL: every binary release carries the corresponding source of the FFmpeg
+  # it bundles (FrameScale's own source is the tagged commit).
+  gpl-sources:
+    name: Attach FFmpeg corresponding source
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Collect sources
+        run: |
+          python3 - > urls.txt <<'PY'
+          import tomllib
+          f = tomllib.load(open("third_party/manifest.toml", "rb"))["ffmpeg"]
+          g = f["gpl_source"]
+          print(g["ffmpeg"], "windows-linux/ffmpeg-source.tar.gz")
+          print(g["builds"], "windows-linux/ffmpeg-builds-scripts.tar.gz")
+          print(f["source"]["url"], "macos/" + f["source"]["url"].rsplit("/", 1)[-1])
+          for name, d in f["source"]["deps"].items():
+              print(d["url"], f"macos/{name}-" + d["url"].rsplit("/", 1)[-1])
+          PY
+          mkdir -p gpl/windows-linux gpl/macos
+          while read -r url name; do
+            curl --fail --location --retry 3 --silent --show-error -o "gpl/$name" "$url"
+          done < urls.txt
+          cp third_party/ffmpeg/build-macos.sh gpl/macos/
+          cat > gpl/README.txt <<'TXT'
+          Corresponding source of the FFmpeg (GPL-3.0-or-later, with x264/x265)
+          bundled in FrameScale AI ${{ github.ref_name }}.
+
+          windows-linux/  FFmpeg at the exact commit of the BtbN/FFmpeg-Builds
+                          autobuild we ship, and BtbN's build scripts at that
+                          tag (they pin every dependency).
+          macos/          The source tarballs and the build script
+                          (build-macos.sh) used for the macOS builds.
+
+          FrameScale AI's own source is the tagged commit of this release.
+          TXT
+          tar -cf ffmpeg-gpl-sources.tar -C gpl .
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" ffmpeg-gpl-sources.tar --clobber --repo "${{ github.repository }}"
