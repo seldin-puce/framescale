@@ -394,6 +394,7 @@ mod tests {
                         path: None,
                     },
                     scale: 2,
+                    denoise: None,
                 }],
             },
             output: OutputSpec {

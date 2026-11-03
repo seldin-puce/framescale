@@ -85,6 +85,30 @@ sha256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96"
 select  = ["models/realesrgan-x4plus.", "models/realesrgan-x4plus-anime.", "models/realesr-animevideov3-"]
 dest    = "realesrgan"
 
+# Real-ESRGAN General v3 (xinntao, BSD-3-Clause): the fast live-action ×4
+# SRVGGNetCompact and its weak-denoise twin. There's no official ncnn release,
+# so `convert = "srvgg"` turns the official .pth into ncnn at build time (the
+# pickle is interpreted, never executed; xtask/src/pth.rs). The engine blends
+# the two by the Upscale stage's denoise strength, like Real-ESRGAN's
+# `--denoise_strength`.
+[[models]]
+id      = "realesr-general-x4v3"
+license = "BSD-3-Clause"
+url     = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth"
+sha256  = "8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292"
+convert = "srvgg"
+file    = "realesr-general-x4v3"
+dest    = "realesrgan/models"
+
+[[models]]
+id      = "realesr-general-x4v3"
+license = "BSD-3-Clause"
+url     = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth"
+sha256  = "1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca"
+convert = "srvgg"
+file    = "realesr-general-wdn-x4v3"
+dest    = "realesrgan/models"
+
 [[models]]
 id      = "realcugan"
 license = "MIT"

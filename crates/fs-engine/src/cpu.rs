@@ -110,7 +110,11 @@ mod tests {
             id: "ref".into(),
             path: None,
         };
-        let mut b = ReferenceBackend::new(&[StageConfig::Upscale { model: m, scale: 2 }]);
+        let mut b = ReferenceBackend::new(&[StageConfig::Upscale {
+            model: m,
+            scale: 2,
+            denoise: None,
+        }]);
         let mut f = solid(3, 2, FrameFormat::Rgb48, 0);
         f.data[0] = 0xff; // pixel (0,0) red low byte
         let up = b.process(&f, 256).expect("up");

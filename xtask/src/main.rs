@@ -5,11 +5,13 @@
 //! runners and on Windows 10+), so this tool needs no TLS stack or C toolchain.
 
 mod archive;
+mod convert;
 mod fetch;
 mod gate;
 mod manifest;
 mod models;
 mod pin;
+mod pth;
 mod sidecars;
 mod util;
 
@@ -48,6 +50,15 @@ enum Cmd {
         #[command(flatten)]
         target: TargetArgs,
     },
+    /// Convert a PyTorch checkpoint to ncnn (`<dir>/<stem>.param` + `.bin`),
+    /// as `models` does for entries with `convert`.
+    Convert {
+        /// Converter: `srvgg`.
+        kind: String,
+        pth: std::path::PathBuf,
+        dir: std::path::PathBuf,
+        stem: String,
+    },
     /// Export ts-rs bindings from fs-types into packages/ipc-types.
     GenTypes,
     /// Check local prerequisites for building the desktop app.
@@ -85,6 +96,12 @@ fn main() -> Result<()> {
             sidecars::fetch_ncnn(&m).map(|p| eprintln!("  ✓ ncnn source → {}", p.display()))
         }
         Cmd::Pin => pin::run(),
+        Cmd::Convert {
+            kind,
+            pth,
+            dir,
+            stem,
+        } => convert::run(&kind, &pth, &dir, &stem),
         Cmd::Gate { ffmpeg, target } => gate::check(&m.ffmpeg.gate, &ffmpeg, &target.resolve()?),
         Cmd::GenTypes => {
             // Start clean so types deleted on the Rust side disappear here too.

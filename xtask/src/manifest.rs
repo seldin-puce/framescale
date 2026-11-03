@@ -71,9 +71,13 @@ pub struct Model {
     /// Archive entries to extract (zip artifacts).
     #[serde(default)]
     pub select: Vec<String>,
-    /// Single-file artifact: stored as `dest/<file>` (no archive).
+    /// Single-file artifact: stored as `dest/<file>` (no archive). With
+    /// `convert`, the output name: `dest/<file>.param` + `.bin`.
     #[serde(default)]
     pub file: Option<String>,
+    /// Convert PyTorch weights to ncnn at build time (see `convert.rs`).
+    #[serde(default)]
+    pub convert: Option<String>,
     pub dest: String,
 }
 

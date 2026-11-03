@@ -70,6 +70,7 @@ fn main() {
                 StageConfig::Upscale {
                     model: m("realesr-animevideov3"),
                     scale: 2,
+                    denoise: None,
                 },
                 (1920, 1080),
                 6,
@@ -79,6 +80,7 @@ fn main() {
                 StageConfig::Upscale {
                     model: m("realesrgan-x4plus"),
                     scale: 4,
+                    denoise: None,
                 },
                 (960, 540),
                 3,
@@ -88,6 +90,7 @@ fn main() {
                 StageConfig::Upscale {
                     model: m("realesrgan-x4plus"),
                     scale: 2,
+                    denoise: None,
                 },
                 (1920, 1080),
                 2,
@@ -100,6 +103,26 @@ fn main() {
                 },
                 (720, 576),
                 6,
+            ),
+            (
+                "General v3 ×2       1920×1080→4K",
+                StageConfig::Upscale {
+                    model: m("realesr-general-x4v3"),
+                    scale: 2,
+                    denoise: Some(0.5),
+                },
+                (1920, 1080),
+                4,
+            ),
+            (
+                "General v3 ×4       960×540→4K",
+                StageConfig::Upscale {
+                    model: m("realesr-general-x4v3"),
+                    scale: 4,
+                    denoise: Some(0.5),
+                },
+                (960, 540),
+                4,
             ),
             (
                 "Real-CUGAN SE denoise 1920×1080",
@@ -214,6 +237,7 @@ fn main() {
                 StageConfig::Upscale {
                     model: m("realesr-animevideov3"),
                     scale: 2,
+                    denoise: None,
                 },
             ),
             (

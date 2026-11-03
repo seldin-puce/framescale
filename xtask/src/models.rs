@@ -1,9 +1,9 @@
 //! Bundled model extraction into `apps/desktop/src-tauri/resources/models/<dest>/`.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::manifest::Manifest;
-use crate::{archive, fetch, util};
+use crate::{archive, convert, fetch, util};
 
 pub fn run(m: &Manifest) -> Result<()> {
     let root = util::tauri_dir().join("resources/models");
@@ -19,6 +19,19 @@ pub fn run(m: &Manifest) -> Result<()> {
     for model in &m.models {
         let fetched = fetch::fetch(&model.artifact)?;
         let dest = root.join(&model.dest);
+        if let Some(kind) = &model.convert {
+            let stem = model
+                .file
+                .as_deref()
+                .context("a converted model needs `file` (the output name)")?;
+            convert::run(kind, &fetched, &dest, stem)
+                .with_context(|| format!("converting {}", model.artifact.url))?;
+            eprintln!(
+                "  ✓ model {:<10} {stem}  (converted: {kind}, {})",
+                model.id, model.license
+            );
+            continue;
+        }
         if let Some(file) = &model.file {
             std::fs::create_dir_all(&dest)?;
             std::fs::copy(&fetched, dest.join(file))?;

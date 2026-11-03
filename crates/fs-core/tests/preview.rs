@@ -79,6 +79,7 @@ async fn preview_and_thumbnail() {
             StageConfig::Upscale {
                 model: m("realesr-animevideov3"),
                 scale: 2,
+                denoise: None,
             },
             StageConfig::Interpolate {
                 model: m("rife-v4.6"),
@@ -125,6 +126,7 @@ async fn preview_and_thumbnail() {
         stages: vec![StageConfig::Upscale {
             model: m("realesr-animevideov3"),
             scale: 2,
+            denoise: None,
         }],
     };
     let h = preview::render(&tools, &hdr, 0.0, 2.0, &up, &root, &|_| {})
@@ -143,6 +145,7 @@ async fn preview_and_thumbnail() {
             StageConfig::Upscale {
                 model: m("realesr-animevideov3"),
                 scale: 2,
+                denoise: None,
             },
         ],
     };

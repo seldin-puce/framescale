@@ -120,6 +120,7 @@ fn make_plan(t: &Tools, src: &Path, seg_dir: &Path) -> (RenderPlan, fs_types::Me
                 StageConfig::Upscale {
                     model: model.clone(),
                     scale: 2,
+                    denoise: None,
                 },
                 StageConfig::Interpolate {
                     model,

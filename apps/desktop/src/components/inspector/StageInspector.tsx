@@ -2,7 +2,7 @@ import type { StageKind } from "@framescale/ipc-types";
 import { ExternalLink } from "lucide-react";
 import { backend } from "@/ipc";
 import { LINKS } from "@/lib/links";
-import { COMING_SOON, MODELS, useApp, type StageState } from "@/stores/app";
+import { COMING_SOON, GENERAL_V3, MODELS, useApp, type StageState } from "@/stores/app";
 import { Segmented } from "../ui/Segmented";
 import { STAGE_META } from "./PipelineChain";
 
@@ -45,6 +45,15 @@ export function StageInspector() {
         <Field label="Scale">
           <Segmented ariaLabel="Upscale factor" value={String(s.scale)} onChange={(v) => set({ scale: Number(v) as 2 | 4 })}
             options={[{ value: "2", label: "2×" }, { value: "4", label: "4×" }]} />
+        </Field>
+      )}
+      {kind === "upscale" && s.model === GENERAL_V3 && (
+        <Field label={`Noise removal · ${Math.round(s.denoise * 100)}%`}>
+          <input type="range" min={0} max={1} step={0.05} value={s.denoise} onChange={(e) => set({ denoise: Number(e.target.value) })}
+            className="accent-accent" aria-describedby="general-denoise-help" />
+          <span id="general-denoise-help" className="text-[10px] leading-snug text-fg-subtle">
+            Lower keeps film grain and fine texture; higher cleans noise but smooths more. 50% is Real-ESRGAN's default.
+          </span>
         </Field>
       )}
       {kind === "denoise" && (

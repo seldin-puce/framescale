@@ -60,6 +60,11 @@ pub enum StageConfig {
     Upscale {
         model: ModelRef,
         scale: u8,
+        /// Noise removal 0–1 for models that blend two checkpoints
+        /// (realesr-general-x4v3: 0 keeps grain, 1 removes the most). `None`:
+        /// the model's default.
+        #[serde(default)]
+        denoise: Option<f32>,
     },
     FaceFix {
         model: ModelRef,
@@ -142,6 +147,9 @@ impl PipelineSpec {
                 StageConfig::Upscale { scale, .. } if !(2..=4).contains(scale) => {
                     errs.push(bad("scale must be 2, 3 or 4"))
                 }
+                StageConfig::Upscale {
+                    denoise: Some(d), ..
+                } if !(0.0..=1.0).contains(d) => errs.push(bad("denoise must be between 0 and 1")),
                 StageConfig::FaceFix { fidelity, .. } if !(0.0..=1.0).contains(fidelity) => {
                     errs.push(bad("fidelity must be within 0–1"))
                 }
@@ -283,6 +291,7 @@ mod tests {
                 StageConfig::Upscale {
                     model: m(),
                     scale: 4,
+                    denoise: None,
                 },
                 StageConfig::Interpolate {
                     model: m(),
@@ -305,10 +314,12 @@ mod tests {
                 StageConfig::Upscale {
                     model: m(),
                     scale: 4,
+                    denoise: None,
                 },
                 StageConfig::Upscale {
                     model: m(),
                     scale: 4,
+                    denoise: None,
                 },
             ],
         };

@@ -254,6 +254,7 @@ mod tests {
                     StageConfig::Upscale {
                         model: m.clone(),
                         scale: 2,
+                        denoise: None,
                     },
                     StageConfig::Interpolate {
                         model: m,

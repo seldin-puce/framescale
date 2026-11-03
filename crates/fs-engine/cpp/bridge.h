@@ -27,6 +27,9 @@ public:
     void load(rust::Str param, rust::Str bin);
     // Same, with the param given as (possibly edited) text.
     void load_text(rust::Str param_text, rust::Str bin);
+    // Param from a file, weights from memory (e.g. a blend of two checkpoints).
+    // The model keeps its own copy: ncnn may reference it for its lifetime.
+    void load_weights(rust::Str param, rust::Slice<const uint8_t> bin);
 
     // Super-resolution: planar RGB [3][h][w] in 0–1 → planar [3][out_h][out_w].
     void run_sr(rust::Slice<const float> input, int32_t w, int32_t h,
@@ -59,6 +62,8 @@ public:
 
 private:
     void index_gaps();
+    // Weights loaded from memory (4-byte aligned); outlives `net_`.
+    std::vector<uint32_t> weights_;
     std::unique_ptr<ncnn::Net> net_;
     int32_t gpu_;
     // Names of the SE statistics blobs (`gap0`, `gap1`, …) in index order.

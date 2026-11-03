@@ -39,6 +39,7 @@ mod ffi {
         fn model_new(gpu: i32, fp16: bool, threads: i32) -> Result<UniquePtr<Model>>;
         fn load(self: Pin<&mut Model>, param: &str, bin: &str) -> Result<()>;
         fn load_text(self: Pin<&mut Model>, param_text: &str, bin: &str) -> Result<()>;
+        fn load_weights(self: Pin<&mut Model>, param: &str, bin: &[u8]) -> Result<()>;
         fn run_outputs(
             self: &Model,
             input: &[f32],
@@ -445,7 +446,7 @@ fn resolve_sr(
 ) -> Result<(PathBuf, PathBuf, usize), EngineError> {
     let (name, native) = match id {
         "realesr-animevideov3" => (format!("realesr-animevideov3-x{scale}"), scale),
-        "realesrgan-x4plus" | "realesrgan-x4plus-anime" => (id.to_owned(), 4),
+        "realesrgan-x4plus" | "realesrgan-x4plus-anime" | GENERAL_V3 => (id.to_owned(), 4),
         other => {
             return Err(EngineError::ModelNotFound(format!(
                 "unknown upscale model '{other}'"
@@ -458,6 +459,56 @@ fn resolve_sr(
         dir.join(format!("{name}.bin")),
         native,
     ))
+}
+
+/// Real-ESRGAN General v3 (live action): two checkpoints, blended by the
+/// denoise strength like the official `--denoise_strength` (DNI).
+const GENERAL_V3: &str = "realesr-general-x4v3";
+/// Its weak-denoise twin (keeps grain).
+const GENERAL_V3_WDN: &str = "realesr-general-wdn-x4v3";
+/// Real-ESRGAN's default strength.
+const GENERAL_V3_DENOISE: f32 = 0.5;
+
+/// Deep network interpolation: weights = s·a + (1 − s)·b. Both bins must be our
+/// fp32 conversions of one architecture (`cargo xtask models`): identical
+/// layouts whose storage flags are 0, so a plain element-wise blend is exact.
+fn dni(a: &[u8], b: &[u8], s: f32) -> Result<Vec<u8>, EngineError> {
+    let fp32 = |x: &[u8]| x.len() >= 4 && x[..4] == [0, 0, 0, 0];
+    if a.len() != b.len() || !a.len().is_multiple_of(4) || !fp32(a) || !fp32(b) {
+        return Err(EngineError::ModelNotFound(
+            "denoise blend needs two fp32 checkpoints of one model".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(a.len());
+    for (x, y) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0) {
+        let (x, y) = (f32::from_le_bytes(*x), f32::from_le_bytes(*y));
+        out.extend_from_slice(&(s * x + (1.0 - s) * y).to_le_bytes());
+    }
+    Ok(out)
+}
+
+/// Load `param` with the DNI blend `s·a + (1 − s)·b` of two weight files.
+fn load_blended(
+    device: &DeviceSel,
+    threads: i32,
+    param: &Path,
+    a: &Path,
+    b: &Path,
+    s: f32,
+) -> Result<UniquePtr<ffi::Model>, EngineError> {
+    let read = |p: &Path| {
+        std::fs::read(p).map_err(|e| EngineError::ModelNotFound(format!("{}: {e}", p.display())))
+    };
+    if !param.exists() {
+        return Err(EngineError::ModelNotFound(param.display().to_string()));
+    }
+    let weights = dni(&read(a)?, &read(b)?, s)?;
+    let fp16 = device.index >= 0;
+    let mut m = ffi::model_new(device.index, fp16, threads).map_err(|e| map_err(&e, 0))?;
+    m.pin_mut()
+        .load_weights(&param.to_string_lossy(), &weights)
+        .map_err(|e| EngineError::ModelNotFound(e.what().to_owned()))?;
+    Ok(m)
 }
 
 fn load(
@@ -534,7 +585,11 @@ impl NcnnBackend {
                     }
                     face_fix = Some(FaceFix::load(models, *fidelity, &device, threads)?);
                 }
-                StageConfig::Upscale { model, scale } => {
+                StageConfig::Upscale {
+                    model,
+                    scale,
+                    denoise,
+                } => {
                     if model.path.is_some() {
                         return Err(EngineError::Unsupported(
                             "custom upscale models are not supported yet".into(),
@@ -542,8 +597,15 @@ impl NcnnBackend {
                     }
                     let (param, bin, native) = resolve_sr(models, &model.id, usize::from(*scale))?;
                     heavy = native == 4 && model.id.starts_with("realesrgan");
+                    let net = if model.id == GENERAL_V3 {
+                        let s = denoise.unwrap_or(GENERAL_V3_DENOISE).clamp(0.0, 1.0);
+                        let wdn = bin.with_file_name(format!("{GENERAL_V3_WDN}.bin"));
+                        load_blended(&device, threads, &param, &bin, &wdn, s)?
+                    } else {
+                        load(&device, threads, &param, &bin)?
+                    };
                     sr = Some(Sr {
-                        model: load(&device, threads, &param, &bin)?,
+                        model: net,
                         native,
                         target: usize::from(*scale),
                     });
@@ -718,6 +780,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dni_blends_fp32_weights() {
+        let bin = |v: &[f32]| -> Vec<u8> {
+            let mut b = vec![0u8; 4]; // storage flag: fp32
+            for x in v {
+                b.extend_from_slice(&x.to_le_bytes());
+            }
+            b
+        };
+        let (a, b) = (bin(&[1.0, -2.0, 4.0]), bin(&[3.0, 2.0, 0.0]));
+        let mix = dni(&a, &b, 0.25).expect("blend");
+        assert_eq!(mix, bin(&[2.5, 1.0, 1.0]), "0.25·a + 0.75·b, flag kept 0");
+        assert_eq!(dni(&a, &b, 1.0).expect("a"), a);
+        let mut fp16 = a.clone();
+        fp16[..4].copy_from_slice(&0x0130_6B47u32.to_le_bytes());
+        assert!(
+            dni(&fp16, &b, 0.5).is_err(),
+            "fp16 bins can't be blended byte-wise"
+        );
+        assert!(dni(&a, &b[..8], 0.5).is_err(), "layouts must match");
+    }
+
+    #[test]
     fn model_resolution() {
         let m = Path::new("/m");
         let (p, _, n) = resolve_sr(m, "realesr-animevideov3", 3).expect("anime");
@@ -732,6 +816,9 @@ mod tests {
             resolve_sr(m, "nope", 2),
             Err(EngineError::ModelNotFound(_))
         ));
+        let (p, _, n) = resolve_sr(m, "realesr-general-x4v3", 2).expect("general");
+        assert!(p.ends_with("realesrgan/models/realesr-general-x4v3.param"));
+        assert_eq!(n, 4, "native ×4, area-downscaled");
         let (dir, align) = resolve_rife(m, "rife-v4.25").expect("4.25");
         assert!(dir.ends_with("rife/rife-v4.25"));
         assert_eq!(align, 64);

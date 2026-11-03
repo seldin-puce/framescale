@@ -26,6 +26,8 @@ export interface StageState {
   enabled: boolean;
   model: string;
   scale: 2 | 4;
+  /** Upscale with Real-ESRGAN General v3: noise removal 0–1 (blends its two checkpoints). */
+  denoise: number;
   strength: 0 | 1 | 2 | 3;
   fidelity: number;
   factor: 2 | 3 | 4;
@@ -37,6 +39,9 @@ export interface StageState {
 /** Stages shown but not runnable yet (none right now). */
 export const COMING_SOON: ReadonlySet<StageKind> = new Set<StageKind>();
 
+/** Upscale model with a noise-removal blend. */
+export const GENERAL_V3 = "realesr-general-x4v3";
+
 export const STAGE_ORDER: StageKind[] = ["deinterlace", "denoise", "upscale", "faceFix", "interpolate"];
 
 export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
@@ -47,6 +52,7 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
   ],
   upscale: [
     { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+ (live action)" },
+    { id: "realesr-general-x4v3", label: "Real-ESRGAN General v3 (live action, fast)" },
     { id: "realesrgan-x4plus-anime", label: "Real-ESRGAN x4+ Anime" },
     { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
@@ -63,6 +69,7 @@ const defaults = (enabled: boolean, model: string): StageState => ({
   enabled,
   model,
   scale: 2,
+  denoise: 0.5,
   strength: 1,
   fidelity: 0.7,
   factor: 2,
@@ -84,7 +91,7 @@ export function toStageConfigs(stages: Record<StageKind, StageState>): StageConf
         out.push({ kind, model, strength: s.strength });
         break;
       case "upscale":
-        out.push({ kind, model, scale: s.scale });
+        out.push({ kind, model, scale: s.scale, denoise: s.model === GENERAL_V3 ? s.denoise : null });
         break;
       case "faceFix":
         out.push({ kind, model, fidelity: s.fidelity });

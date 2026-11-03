@@ -90,6 +90,7 @@ fn real_models_on_every_device() {
                 vec![StageConfig::Upscale {
                     model: m("realesr-animevideov3"),
                     scale: 2,
+                    denoise: None,
                 }],
                 &models,
             ),
@@ -108,6 +109,7 @@ fn real_models_on_every_device() {
         let nn = fs_engine::cpu::ReferenceBackend::new(&[StageConfig::Upscale {
             model: m("x"),
             scale: 2,
+            denoise: None,
         }])
         .process(&src, 0)
         .expect("nn");
@@ -122,6 +124,7 @@ fn real_models_on_every_device() {
                 vec![StageConfig::Upscale {
                     model: m("realesrgan-x4plus"),
                     scale: 2,
+                    denoise: None,
                 }],
                 &models,
             ),
@@ -176,6 +179,7 @@ fn real_models_on_every_device() {
         }
 
         // Inside the device loop: ncnn::shutdown() below ends Vulkan for good.
+        check_general_v3(&dev, &models);
         check_real_cugan(&dev, &models);
         check_face_fix(&dev, &models);
     }
@@ -203,6 +207,97 @@ fn real_models_on_every_device() {
     .expect_err("custom face model");
     assert!(err.to_string().contains("not supported"), "{err}");
     ncnn::shutdown();
+}
+
+fn upscale(
+    models: &std::path::Path,
+    dev: &DeviceSel,
+    id: &str,
+    denoise: Option<f32>,
+    src: &Frame,
+) -> Frame {
+    let stage = StageConfig::Upscale {
+        model: ModelRef {
+            id: id.into(),
+            path: None,
+        },
+        scale: 4,
+        denoise,
+    };
+    let mut b = NcnnBackend::new(&plan(vec![stage], models), dev.clone(), 4)
+        .unwrap_or_else(|e| panic!("load {id}: {e}"));
+    b.process(src, 256).unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+/// Real-ESRGAN General v3, converted from the official .pth at build time,
+/// and its denoise blend (DNI with the weak-denoise checkpoint). Also checks
+/// the converter itself: AnimeVideo-v3 converted the same way
+/// (`FS_CONVERTED_ANIMEV3` = folder with `animev3.param/.bin`, from
+/// `cargo xtask convert srvgg realesr-animevideov3.pth <dir> animev3`) must
+/// match xinntao's own ncnn export.
+fn check_general_v3(dev: &DeviceSel, models: &std::path::Path) {
+    let clean = test_frame(64, 48, 0);
+    let grainy = noisy(&clean, 24);
+    let reference = upscale(models, dev, "realesr-general-x4v3", Some(0.5), &clean);
+    assert_eq!((reference.width, reference.height), (256, 192));
+    let keep = upscale(models, dev, "realesr-general-x4v3", Some(0.0), &grainy);
+    let strong = upscale(models, dev, "realesr-general-x4v3", Some(1.0), &grainy);
+    let default = upscale(models, dev, "realesr-general-x4v3", None, &grainy);
+    let (d_keep, d_strong) = (
+        mean_abs_diff(&keep, &reference),
+        mean_abs_diff(&strong, &reference),
+    );
+    eprintln!("   general v3 on noise: denoise 0 → |Δ| {d_keep:.2} from clean, 1 → {d_strong:.2}");
+    assert!(
+        d_strong < d_keep,
+        "more denoise lands closer to the clean result"
+    );
+    assert!(
+        mean_abs_diff(&keep, &strong) > 0.5,
+        "the blend changes the result"
+    );
+    let d_mid = mean_abs_diff(&default, &reference);
+    assert!(
+        d_strong <= d_mid && d_mid <= d_keep,
+        "default 0.5 sits between: {d_mid}"
+    );
+    // Colours: the upscale keeps the picture's mean.
+    let mean = |f: &Frame| f.data.iter().map(|v| f32::from(*v)).sum::<f32>() / f.data.len() as f32;
+    assert!(
+        (mean(&reference) - mean(&clean)).abs() < 6.0,
+        "brightness kept"
+    );
+
+    let Some(conv) = env_path("FS_CONVERTED_ANIMEV3") else {
+        return eprintln!("   skip converter check: set FS_CONVERTED_ANIMEV3");
+    };
+    // A models folder whose AnimeVideo-v3 ×4 is our conversion.
+    let alt = std::env::temp_dir().join(format!("fs-conv-{}", std::process::id()));
+    let dir = alt.join("realesrgan").join("models");
+    std::fs::create_dir_all(&dir).expect("dir");
+    for ext in ["param", "bin"] {
+        std::fs::copy(
+            conv.join(format!("animev3.{ext}")),
+            dir.join(format!("realesr-animevideov3-x4.{ext}")),
+        )
+        .expect("copy converted model");
+    }
+    let ours = upscale(&alt, dev, "realesr-animevideov3", None, &clean);
+    let official = upscale(models, dev, "realesr-animevideov3", None, &clean);
+    let d = mean_abs_diff(&ours, &official);
+    let max = ours
+        .data
+        .iter()
+        .zip(&official.data)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    eprintln!("   converted vs official AnimeVideo-v3: mean |Δ| {d:.3}, max {max}");
+    assert!(
+        d < 0.5 && max <= 6,
+        "our converter reproduces the official export"
+    );
+    let _ = std::fs::remove_dir_all(alt);
 }
 
 /// Deterministic noise (LCG), roughly ±`amp` levels.

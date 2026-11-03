@@ -19,7 +19,13 @@
   Vulkan via SimpleVK (no SDK; the loader is dlopen'd) and ncnn's
   self-contained OpenMP on Linux/macOS. `cpp/bridge.cpp` is a cxx bridge.
 - Models: Real-ESRGAN x4plus / x4plus-anime (native ×4, exact area-downscale to
-  ×2/×3) and AnimeVideo-v3 ×2/×3/×4. RIFE 4.6, 4.22 lite, 4.25 (default) and
+  ×2/×3), AnimeVideo-v3 ×2/×3/×4 and General v3 (live action, native ×4).
+  General v3 has no official ncnn export: `cargo xtask models` converts the
+  official .pth (`convert = "srvgg"`: the pickle is interpreted with an
+  allow-list, never executed) into fp32 ncnn files. Converting AnimeVideo-v3
+  the same way reproduces xinntao's own export (mean |Δ| 0.04, max 2 levels).
+  Its noise-removal slider blends the general and weak-denoise checkpoints
+  (DNI, s·a + (1 − s)·b) when the model loads. RIFE 4.6, 4.22 lite, 4.25 (default) and
   4.26 run through our own `rife.Warp` custom layer: a Vulkan bilinear warp
   (pack1/pack4 shaders after nihui's, fp32 coordinates) with a CPU twin for CPU
   nets. 4.25 and 4.26 need frames padded to a multiple of 64, the rest 32.
@@ -44,6 +50,8 @@ plus CPU-side conversion; excludes decode/encode):
 | Real-ESR AnimeVideo-v3 ×2, 1920×1080 → 3840×2160 | **10.9** |
 | Real-ESRGAN x4plus ×4, 960×540 → 3840×2160 | **1.31** |
 | Real-ESRGAN x4plus ×2, 1920×1080 → 3840×2160 | 0.31 |
+| Real-ESRGAN General v3 ×4, 960×540 → 3840×2160 | **13.5** |
+| Real-ESRGAN General v3 ×2, 1920×1080 → 3840×2160 | 2.4 |
 | RIFE 4.6, 1920×1080 | 15.6 |
 | RIFE 4.22 lite / 4.25 / 4.26, 1920×1080 | 14.5 / 14.1 / 14.3 |
 | RIFE 4.6, 3840×2160 | 3.0 |

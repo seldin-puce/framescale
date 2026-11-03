@@ -34,6 +34,7 @@ own licenses apply to those components. This file ships inside the application b
 | Model | License | Source |
 |---|---|---|
 | Real-ESRGAN (x4plus, x4plus-anime, animevideov3) | BSD-3-Clause | https://github.com/xinntao/Real-ESRGAN |
+| Real-ESRGAN General v3 (realesr-general-x4v3 + wdn), converted to ncnn at build time from the official v0.2.5.0 weights | BSD-3-Clause, © 2021 Xintao Wang | https://github.com/xinntao/Real-ESRGAN |
 | Real-CUGAN (se, pro) | MIT | https://github.com/bilibili/ailab / nihui/realcugan-ncnn-vulkan |
 | RIFE 4.6, 4.22 lite, 4.25, 4.26 | MIT, © 2021 hzwer (weights); ncnn conversions MIT, © 2020 nihui | https://github.com/hzwer/Practical-RIFE / nihui/rife-ncnn-vulkan / TNTwise/rife-ncnn-vulkan (commit `13338e3`) |
 | YuNet face detector (2023mar), ncnn conversion | MIT, © 2020 Shiqi Yu | https://github.com/opencv/opencv_zoo / huggingface.co/lightcella/face-pipeline-ncnn |

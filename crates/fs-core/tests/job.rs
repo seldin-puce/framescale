@@ -82,7 +82,11 @@ async fn full_job_with_hard_pause_and_resume() {
     let spec = JobSpec {
         input: src.to_string_lossy().into(),
         pipeline: PipelineSpec {
-            stages: vec![StageConfig::Upscale { model: m, scale: 2 }],
+            stages: vec![StageConfig::Upscale {
+                model: m,
+                scale: 2,
+                denoise: None,
+            }],
         },
         output: OutputSpec {
             path: out.to_string_lossy().into(),
