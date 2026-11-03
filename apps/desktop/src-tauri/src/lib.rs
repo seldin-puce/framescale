@@ -129,8 +129,7 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
             .effects(WindowEffectsConfig {
                 effects: vec![Effect::Sidebar],
                 state: Some(EffectState::FollowsWindowActiveState),
-                radius: None,
-                color: None,
+                ..Default::default()
             });
     }
 
@@ -142,9 +141,7 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         // CSS background shows through instead.
         builder = builder.transparent(true).effects(WindowEffectsConfig {
             effects: vec![Effect::Mica],
-            state: None,
-            radius: None,
-            color: None,
+            ..Default::default()
         });
     }
 
