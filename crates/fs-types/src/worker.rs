@@ -111,6 +111,14 @@ pub struct EncodePlan {
     pub rate: Rational,
     pub color: ColorProfile,
     pub hdr: HdrEmbedding,
+    /// Pixel aspect of the source (DVD/DV/HDV are anamorphic). Every stage
+    /// scales uniformly, so it carries over to the output unchanged.
+    #[serde(default = "square_pixels")]
+    pub sample_aspect: Rational,
+}
+
+fn square_pixels() -> Rational {
+    Rational::new(1, 1)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

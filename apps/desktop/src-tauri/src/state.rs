@@ -42,6 +42,8 @@ pub struct AppState {
     pub active: Mutex<Option<ActiveJob>>,
     /// Wakes the queue loop (new job, resume, reorder…).
     pub queue_changed: Notify,
+    /// Open source-vs-output comparison sessions, by session id.
+    pub compare: Mutex<std::collections::VecDeque<Arc<fs_core::compare::CompareSession>>>,
     pub job_events: broadcast::Sender<JobEvent>,
     pub telemetry: watch::Sender<Telemetry>,
 }
@@ -92,6 +94,7 @@ impl AppState {
             hw_ready: Notify::new(),
             active: Mutex::new(None),
             queue_changed: Notify::new(),
+            compare: Mutex::new(std::collections::VecDeque::new()),
             job_events,
             telemetry,
         }))

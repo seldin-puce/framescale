@@ -1,4 +1,5 @@
 import type {
+  CompareInfo,
   DeviceUuid,
   EcoMode,
   GpuDevice,
@@ -65,6 +66,18 @@ export interface Backend {
   assetUrl(rel: string): string;
   /** Open an external link in the system browser (Ko-fi / GitHub only). */
   openExternal(url: string): Promise<void>;
+  /** Play a finished job's output in the system player. */
+  openOutput(id: JobId): Promise<void>;
+  /** Show a finished job's output, selected, in the file manager. */
+  revealOutput(id: JobId): Promise<void>;
+  /** Play a job's original source in the system player. */
+  openSource(id: JobId): Promise<void>;
+  /** Start a source-vs-output comparison of a finished job. */
+  compareOpen(id: JobId, maxWidth: number): Promise<CompareInfo>;
+  /** Stop a comparison's decoders (frames: `compare/<session>/<side>/[full/]<n>.jpg`). */
+  compareClose(session: string): Promise<void>;
+  /** Folder picker for the output destination; null if cancelled. */
+  pickFolder(): Promise<string | null>;
   subscribeJobs(cb: (e: JobEvent) => void): Promise<Unsubscribe>;
   subscribeTelemetry(cb: (t: Telemetry) => void): Promise<Unsubscribe>;
   pickFiles(): Promise<string[]>;

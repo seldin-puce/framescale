@@ -1,3 +1,4 @@
+import { CircleCheck } from "lucide-react";
 import { basename, duration, fps } from "@/lib/format";
 import { useApp } from "@/stores/app";
 
@@ -9,6 +10,8 @@ export function StatusBar() {
   const output = useApp((s) => s.output);
   const active = Object.values(jobs).find((j) => ["analyzing", "rendering", "paused", "concatenating", "muxing"].includes(j.state));
   const p = active ? progress[active.id] : undefined;
+  const lastId = useApp((s) => s.completed);
+  const last = useApp((s) => (s.completed ? s.jobs[s.completed] : undefined));
 
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-surface-glass px-3 text-[11px] text-fg-muted" role="status" aria-live="polite">
@@ -21,6 +24,14 @@ export function StatusBar() {
             </span>
           )}
         </>
+      ) : last?.state === "done" && lastId ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <CircleCheck className="size-3 shrink-0 text-ok" />
+          <span className="truncate">Finished {basename(last.spec.output.path)}</span>
+          <button type="button" onClick={() => void useApp.getState().revealOutput(lastId)} className="shrink-0 text-accent hover:text-accent-hover">
+            Show in folder
+          </button>
+        </span>
       ) : (
         <span>Idle</span>
       )}

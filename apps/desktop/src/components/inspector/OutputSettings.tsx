@@ -1,4 +1,7 @@
 import type { Container, VideoCodec } from "@framescale/ipc-types";
+import { FolderOpen, RotateCcw } from "lucide-react";
+import { backend } from "@/ipc";
+import { prettyDir } from "@/lib/format";
 import { CODEC_ENCODERS, useApp } from "@/stores/app";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -59,9 +62,44 @@ export function OutputSettings() {
         </span>
         <input type="range" min={12} max={34} value={output.quality} onChange={(e) => setOutput({ quality: Number(e.target.value) })} className="accent-accent" />
       </label>
+      <SaveTo />
       <Tooltip label="Primaries, transfer (incl. PQ/HLG), matrix and range are carried from source to output. Audio is copied bit-exact.">
         <p className="cursor-help text-[10px] text-fg-subtle">Color &amp; audio passthrough · HDR10 preserved</p>
       </Tooltip>
+    </div>
+  );
+}
+
+/** Where renders go, visible before rendering (not something to hunt for after). */
+function SaveTo() {
+  const dir = useApp((s) => s.outputDir);
+  const setDir = useApp((s) => s.setOutputDir);
+  const upscale = useApp((s) => s.stages.upscale);
+  const container = useApp((s) => s.output.container);
+  const tag = upscale.enabled ? `${upscale.scale}x` : "enhanced";
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] text-fg-muted">Save to</span>
+      <div className="flex items-center gap-1.5">
+        <div className="min-w-0 flex-1 truncate rounded-sm border border-border-strong bg-black/30 px-2 py-1.5 text-xs text-fg" title={dir ?? undefined}>
+          {dir ? prettyDir(`${dir}/x`) : "Same folder as each source"}
+        </div>
+        <button
+          type="button"
+          onClick={() => void backend.pickFolder().then((d) => d && setDir(d))}
+          className="flex shrink-0 items-center gap-1 rounded-sm bg-white/6 px-2 py-1.5 text-xs text-fg ring-1 ring-border-strong hover:bg-white/10"
+        >
+          <FolderOpen className="size-3.5" /> Change…
+        </button>
+        {dir && (
+          <button type="button" aria-label="Save next to each source again" title="Save next to each source again" onClick={() => setDir(null)} className="shrink-0 rounded-sm p-1.5 text-fg-subtle hover:bg-white/6 hover:text-fg">
+            <RotateCcw className="size-3.5" />
+          </button>
+        )}
+      </div>
+      <span className="truncate font-mono text-[10px] text-fg-subtle">
+        name_framescale_{tag}.{container}
+      </span>
     </div>
   );
 }

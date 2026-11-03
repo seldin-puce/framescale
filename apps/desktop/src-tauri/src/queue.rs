@@ -7,7 +7,7 @@ use fs_types::{JobEvent, JobState};
 
 use crate::state::{ActiveJob, AppState};
 
-pub async fn run(state: Arc<AppState>) {
+pub async fn run(app: tauri::AppHandle, state: Arc<AppState>) {
     // Planning needs the encoder probe; wait for hardware discovery once.
     while !state.hardware_ready() {
         // Bounded wait: a notification sent before we started waiting is not lost.
@@ -68,6 +68,7 @@ pub async fn run(state: Arc<AppState>) {
             *a = None;
         }
         tracing::info!(job = %job.id, ?final_state, "job finished");
+        notify_finished(&app, &job.spec.output.path, final_state);
         if final_state == JobState::Cancelled {
             if let Ok(j) = state.journal.lock() {
                 let _ = j.set_state(job.id, JobState::Cancelled, None);
@@ -79,4 +80,44 @@ pub async fn run(state: Arc<AppState>) {
             });
         }
     }
+}
+
+/// Tell the user a render ended. In the app, the completion card does that.
+/// When the window isn't focused, also send a system notification and flash
+/// the taskbar entry. Nobody watches a 10-hour batch.
+fn notify_finished(app: &tauri::AppHandle, output: &str, final_state: JobState) {
+    use tauri::Manager;
+    use tauri_plugin_notification::NotificationExt;
+
+    let (title, body) = match final_state {
+        JobState::Done => ("Render finished", format!("{} is ready", file_name(output))),
+        JobState::Failed => (
+            "Render failed",
+            format!(
+                "{} could not be rendered. Open FrameScale for details",
+                file_name(output)
+            ),
+        ),
+        _ => return,
+    };
+    let window = app.get_webview_window("main");
+    let focused = window
+        .as_ref()
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false);
+    if focused {
+        return;
+    }
+    if let Err(e) = app.notification().builder().title(title).body(&body).show() {
+        tracing::warn!(error = %e, "system notification failed");
+    }
+    if let Some(w) = window {
+        let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+    }
+}
+
+fn file_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned())
 }

@@ -73,4 +73,13 @@ export const tauriBackend: Backend = {
   // Tauri webviews don't hand `target="_blank"` links to the OS; the opener
   // plugin does, restricted to Ko-fi/GitHub by the capability scope.
   openExternal: (url) => openUrl(url),
+  openOutput: (id) => invoke("open_output", { id }),
+  revealOutput: (id) => invoke("reveal_output", { id }),
+  openSource: (id) => invoke("open_source", { id }),
+  compareOpen: (id, maxWidth) => invoke("compare_open", { id, maxWidth: Math.round(maxWidth) }),
+  compareClose: (session) => invoke("compare_close", { session }),
+  async pickFolder() {
+    const r = await open({ directory: true, multiple: false });
+    return typeof r === "string" ? r : null;
+  },
 };

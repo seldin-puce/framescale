@@ -39,10 +39,21 @@ export function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-/** `/a/b/clip.mov` → `/a/b/clip_framescale_4x.mkv` */
-export function outputPathFor(input: string, scale: number, ext: string): string {
+export function dirname(path: string): string {
+  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return i > 0 ? path.slice(0, i) : path;
+}
+
+/** Folder for display: home shortened to `~`. */
+export function prettyDir(path: string): string {
+  const d = dirname(path);
+  return d.replace(/^\/(home|Users)\/[^/]+/, "~");
+}
+
+/** `/a/b/clip.mov` → `<dir or /a/b>/clip_framescale_4x.mkv` */
+export function outputPathFor(input: string, scale: number, ext: string, outputDir?: string | null): string {
   const sep = input.includes("\\") ? "\\" : "/";
-  const dir = input.slice(0, Math.max(0, input.lastIndexOf(sep)));
+  const dir = outputDir || input.slice(0, Math.max(0, input.lastIndexOf(sep)));
   const stem = basename(input).replace(/\.[^.]+$/, "");
   const tag = scale > 1 ? `${scale}x` : "enhanced";
   return `${dir}${dir ? sep : ""}${stem}_framescale_${tag}.${ext}`;

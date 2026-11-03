@@ -67,7 +67,7 @@ fn source(t: &Tools, dir: &Path) -> PathBuf {
             "-i",
             "sine=f=440:d=6.25",
             "-filter_complex",
-            "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p,setpts=PTS+0.25/TB[v]",
+            "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p,setsar=16/15,setpts=PTS+0.25/TB[v]",
             "-map",
             "[v]",
             "-map",
@@ -348,6 +348,11 @@ fn full_run_cut_holds_and_bit_exact_resume() {
     let fin = probe::probe(&t.ffprobe, &out).expect("probe final");
     assert_eq!(fin.audio.len(), 1);
     assert_eq!((fin.video.width, fin.video.height), (320, 240));
+    assert_eq!(
+        fin.video.sample_aspect,
+        fs_types::Rational::new(16, 15),
+        "anamorphic pixel aspect must survive segments, concat and mux"
+    );
     assert!(
         (fin.video.start_time - fin.audio[0].start_time - 0.25).abs() < 0.02,
         "video must start 0.25 s after audio, got v={} a={}",

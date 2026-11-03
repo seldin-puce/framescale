@@ -3,7 +3,7 @@ import { InspectorSidebar } from "../inspector/InspectorSidebar";
 import { QueueSidebar } from "../queue/QueueSidebar";
 import { Viewport } from "../viewport/Viewport";
 import { AboutDialog } from "../support/AboutDialog";
-import { SupportNudge } from "../support/SupportNudge";
+import { CompletionCard } from "../support/CompletionCard";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
@@ -38,7 +38,7 @@ export function AppShell() {
       </Group>
       <StatusBar />
       <AboutDialog />
-      <SupportNudge />
+      <CompletionCard />
       <Toast />
     </div>
   );

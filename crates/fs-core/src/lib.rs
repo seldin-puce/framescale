@@ -7,6 +7,7 @@
 //! - [`janitor`]: startup cleanup of abandoned temp dirs (never resumable ones)
 #![deny(unsafe_code)]
 
+pub mod compare;
 pub mod janitor;
 pub mod preview;
 pub mod recovery;

@@ -8,6 +8,8 @@ export type { AudioStream } from "./generated/AudioStream";
 export type { ColorPrimaries } from "./generated/ColorPrimaries";
 export type { ColorProfile } from "./generated/ColorProfile";
 export type { ColorRange } from "./generated/ColorRange";
+export type { CompareInfo } from "./generated/CompareInfo";
+export type { CompareSide } from "./generated/CompareSide";
 export type { Container } from "./generated/Container";
 export type { ContentLightLevel } from "./generated/ContentLightLevel";
 export type { DeviceKind } from "./generated/DeviceKind";

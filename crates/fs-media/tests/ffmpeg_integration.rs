@@ -231,6 +231,7 @@ fn hdr10_passthrough_through_rgb48_and_svtav1() {
         rate: Rational::new(25, 1),
         color: sel_color,
         hdr: HdrEmbedding::Bitstream,
+        sample_aspect: Rational::new(1, 1),
     };
     let seg = dir.join("seg_00000.mkv");
     let a = argv::encode_segment(&enc, 256, 144, FrameFormat::Rgb48, &seg);
@@ -352,6 +353,7 @@ fn hdr10_static_metadata_survives_x265_bitstream() {
             ..color
         },
         hdr: sel.hdr,
+        sample_aspect: Rational::new(16, 15),
     };
     let out = dir.join("seg.mkv");
     let a = argv::encode_segment(&enc, 320, 180, FrameFormat::Rgb48, &out);
@@ -378,6 +380,11 @@ fn hdr10_static_metadata_survives_x265_bitstream() {
     let got = probe_info(&fp, &out);
     assert_eq!(got.video.codec, "hevc");
     assert_eq!(got.video.profile.as_deref(), Some("Main 10"));
+    assert_eq!(
+        got.video.sample_aspect,
+        Rational::new(16, 15),
+        "pixel aspect carried"
+    );
     assert_eq!(got.video.color.transfer, TransferCharacteristic::Pq);
     assert_eq!(
         got.video.color.mastering,

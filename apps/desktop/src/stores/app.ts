@@ -134,6 +134,16 @@ export interface PreviewState {
 
 let previewToken = 0;
 
+const OUTPUT_DIR_KEY = "framescale.outputDir";
+
+function loadOutputDir(): string | null {
+  try {
+    return localStorage.getItem(OUTPUT_DIR_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export type CompareMode = "split" | "side" | "before" | "after";
 
 export interface OutputState {
@@ -158,8 +168,16 @@ interface AppStore {
   compareMode: CompareMode;
   /** About / support dialog. */
   aboutOpen: boolean;
-  /** The occasional, dismissible "Enjoying FrameScale?" card after a render. */
+  /** The occasional, dismissible "Enjoying FrameScale?" line after a render. */
   nudge: boolean;
+  /** Most recently finished job: drives the completion card and status bar. */
+  completed: JobId | null;
+  /** Card dismissed (the status bar keeps the link). */
+  completedDismissed: boolean;
+  /** Output folder; null = next to each source file. */
+  outputDir: string | null;
+  /** Start in-app comparison playback once this job's comparison is open. */
+  autoplay: JobId | null;
   toast: { kind: "error" | "info"; message: string } | null;
   preview: PreviewState;
 
@@ -177,6 +195,15 @@ interface AppStore {
   setCompareMode(m: CompareMode): void;
   setAboutOpen(open: boolean): void;
   dismissNudge(): void;
+  dismissCompleted(): void;
+  setOutputDir(dir: string | null): void;
+  /** Open / reveal / compare actions for finished jobs. */
+  openOutput(id: JobId): Promise<void>;
+  revealOutput(id: JobId): Promise<void>;
+  openSource(id: JobId): Promise<void>;
+  /** Show a finished job and play it against its source, in the app. */
+  playCompare(id: JobId): void;
+  clearAutoplay(): void;
   setDevice(uuid: string | null): Promise<void>;
   jobAction(id: JobId, action: "pause" | "hardPause" | "resume" | "cancel" | "remove"): Promise<void>;
   handleEvent(e: JobEvent): void;
@@ -204,6 +231,10 @@ export const useApp = create<AppStore>()((set, get) => ({
   compareMode: "split",
   aboutOpen: false,
   nudge: false,
+  completed: null,
+  completedDismissed: false,
+  outputDir: loadOutputDir(),
+  autoplay: null,
   toast: null,
   preview: { status: "idle", path: null, result: null, error: null, refining: false },
 
@@ -291,7 +322,7 @@ export const useApp = create<AppStore>()((set, get) => ({
       input: d.path,
       pipeline,
       output: {
-        path: outputPathFor(d.path, scale, output.container),
+        path: outputPathFor(d.path, scale, output.container, get().outputDir),
         codec: output.codec,
         container: output.container,
         quality: output.quality,
@@ -324,6 +355,39 @@ export const useApp = create<AppStore>()((set, get) => ({
   dismissNudge: () => {
     supportNudge.dismissed();
     set({ nudge: false });
+  },
+  dismissCompleted: () => set({ completedDismissed: true, nudge: false }),
+  playCompare: (id) => set({ selected: id, autoplay: id, completedDismissed: true }),
+  clearAutoplay: () => set({ autoplay: null }),
+  setOutputDir: (dir) => {
+    try {
+      if (dir) localStorage.setItem(OUTPUT_DIR_KEY, dir);
+      else localStorage.removeItem(OUTPUT_DIR_KEY);
+    } catch {
+      // storage unavailable: the choice lasts for this session
+    }
+    set({ outputDir: dir });
+  },
+  async openOutput(id) {
+    try {
+      await backend.openOutput(id);
+    } catch (e) {
+      get().fail(e);
+    }
+  },
+  async revealOutput(id) {
+    try {
+      await backend.revealOutput(id);
+    } catch (e) {
+      get().fail(e);
+    }
+  },
+  async openSource(id) {
+    try {
+      await backend.openSource(id);
+    } catch (e) {
+      get().fail(e);
+    }
   },
 
   async setDevice(uuid) {
@@ -365,6 +429,7 @@ export const useApp = create<AppStore>()((set, get) => ({
           }
           return {
             jobs: { ...s.jobs, [e.job]: { ...job, state: e.state, error: e.reason } },
+            ...(e.state === "done" ? { completed: e.job, completedDismissed: false } : {}),
             // A finished render is the one moment a gentle "tip jar" note is welcome.
             nudge: s.nudge || (e.state === "done" && supportNudge.due()),
           };

@@ -124,9 +124,19 @@ pub async fn probe_media(state: S<'_>, paths: Vec<String>) -> R<Vec<ProbeResult>
 }
 
 #[tauri::command]
-pub fn enqueue_jobs(state: S<'_>, specs: Vec<JobSpec>) -> R<Vec<JobId>> {
+pub fn enqueue_jobs(state: S<'_>, mut specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     for spec in &specs {
         reject_unsupported(&spec.pipeline)?;
+    }
+    // Never overwrite: not an existing file, not another job's pending output.
+    let mut taken: std::collections::HashSet<String> = journal(&state, |j| j.list_jobs())?
+        .into_iter()
+        .filter(|j| !matches!(j.state, JobState::Done | JobState::Cancelled))
+        .map(|j| j.spec.output.path)
+        .collect();
+    for spec in &mut specs {
+        spec.output.path = unique_output(&spec.output.path, &taken);
+        taken.insert(spec.output.path.clone());
     }
     let mut ids = Vec::with_capacity(specs.len());
     for spec in &specs {
@@ -141,6 +151,26 @@ pub fn enqueue_jobs(state: S<'_>, specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     }
     state.queue_changed.notify_one();
     Ok(ids)
+}
+
+/// `clip_framescale_2x.mp4` → `clip_framescale_2x (2).mp4`, … while the name
+/// is taken on disk or by a queued job.
+fn unique_output(path: &str, taken: &std::collections::HashSet<String>) -> String {
+    let free = |c: &std::path::Path| !c.exists() && !taken.contains(c.to_string_lossy().as_ref());
+    let p = std::path::Path::new(path);
+    if free(p) {
+        return path.to_owned();
+    }
+    let stem = p
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let ext = p
+        .extension()
+        .map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
+    (2u32..)
+        .map(|i| p.with_file_name(format!("{stem} ({i}){ext}")))
+        .find(|c| free(c))
+        .map_or_else(|| path.to_owned(), |c| c.to_string_lossy().into_owned())
 }
 
 fn reject_unsupported(pipeline: &fs_types::PipelineSpec) -> R<()> {
@@ -222,6 +252,107 @@ pub async fn thumbnail(state: S<'_>, path: String) -> R<String> {
         tracing::warn!(%path, error = %e, "thumbnail failed");
         err("thumbnail", e)
     })
+}
+
+/// The output file of a finished job. Paths come from the journal, never from
+/// the webview, so these commands can't be used to open arbitrary files.
+fn finished_output(state: &AppState, id: JobId) -> R<PathBuf> {
+    let (job_state, spec) = journal(state, |j| Ok((j.state(id)?, j.spec(id)?)))?;
+    if job_state != JobState::Done {
+        return Err(err("notFinished", "this job hasn't finished yet"));
+    }
+    let path = PathBuf::from(spec.output.path);
+    if !path.exists() {
+        return Err(err(
+            "notFound",
+            format!("{} was moved or deleted", path.display()),
+        ));
+    }
+    Ok(path)
+}
+
+/// Play the rendered video in the system's default player.
+#[tauri::command]
+pub fn open_output(app: tauri::AppHandle, state: S<'_>, id: JobId) -> R<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = finished_output(&state, id)?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| err("open", e.to_string()))
+}
+
+/// Show the rendered video in the file manager, selected.
+#[tauri::command]
+pub fn reveal_output(app: tauri::AppHandle, state: S<'_>, id: JobId) -> R<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = finished_output(&state, id)?;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|e| err("reveal", e.to_string()))
+}
+
+/// Play the original source of a job in the system's default player.
+#[tauri::command]
+pub fn open_source(app: tauri::AppHandle, state: S<'_>, id: JobId) -> R<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = PathBuf::from(journal(&state, |j| j.spec(id))?.input);
+    if !path.exists() {
+        return Err(err(
+            "notFound",
+            format!("{} was moved or deleted", path.display()),
+        ));
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| err("open", e.to_string()))
+}
+
+/// Start comparing a finished render with its source. Frames are served by
+/// the `fs://` protocol (`compare/<session>/…`, see `protocol.rs`).
+#[tauri::command]
+pub async fn compare_open(state: S<'_>, id: JobId, max_width: u32) -> R<fs_types::CompareInfo> {
+    let output = finished_output(&state, id)?;
+    let source = PathBuf::from(journal(&state, |j| j.spec(id))?.input);
+    if !source.exists() {
+        return Err(err(
+            "notFound",
+            format!("the original, {}, was moved or deleted", source.display()),
+        ));
+    }
+    let session = fs_core::compare::CompareSession::open(
+        &state.paths.ffmpeg,
+        &state.paths.ffprobe,
+        &source,
+        &output,
+        max_width,
+    )
+    .await
+    .map_err(|e| err("compare", e))?;
+    let info = session.info.clone();
+    if let Ok(mut open) = state.compare.lock() {
+        open.push_back(Arc::new(session));
+        // One viewer: older sessions only linger while the UI switches over.
+        while open.len() > 2 {
+            if let Some(old) = open.pop_front() {
+                old.close();
+            }
+        }
+    }
+    Ok(info)
+}
+
+/// Stop a comparison's decoders.
+#[tauri::command]
+pub fn compare_close(state: S<'_>, session: String) {
+    if let Ok(mut open) = state.compare.lock() {
+        open.retain(|s| {
+            let keep = s.info.session != session;
+            if !keep {
+                s.close();
+            }
+            keep
+        });
+    }
 }
 
 #[tauri::command]
@@ -354,4 +485,23 @@ pub fn subscribe_telemetry(state: S<'_>, channel: Channel<Telemetry>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_output;
+
+    #[test]
+    fn output_names_never_collide() {
+        let dir = std::env::temp_dir().join(format!("fs-unique-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let p = |n: &str| dir.join(n).to_string_lossy().into_owned();
+        let none = std::collections::HashSet::new();
+        assert_eq!(unique_output(&p("a_2x.mp4"), &none), p("a_2x.mp4"));
+        std::fs::write(p("a_2x.mp4"), b"").expect("w");
+        assert_eq!(unique_output(&p("a_2x.mp4"), &none), p("a_2x (2).mp4"));
+        let taken = [p("a_2x (2).mp4")].into_iter().collect();
+        assert_eq!(unique_output(&p("a_2x.mp4"), &taken), p("a_2x (3).mp4"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

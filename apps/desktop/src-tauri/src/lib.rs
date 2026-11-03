@@ -36,13 +36,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // Opens donation / source links in the system browser (scoped in capabilities).
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("fs", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let response = match app.try_state::<std::sync::Arc<state::AppState>>() {
-                    Some(state) => protocol::serve(&state, &request),
+            tauri::async_runtime::spawn(async move {
+                let state = app
+                    .try_state::<std::sync::Arc<state::AppState>>()
+                    .map(|s| s.inner().clone());
+                let response = match state {
+                    Some(state) => protocol::serve(state, request).await,
                     None => tauri::http::Response::builder()
                         .status(503)
                         .body(Vec::new())
@@ -61,7 +65,7 @@ pub fn run() {
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             app.manage(state.clone());
             tauri::async_runtime::spawn(state.clone().init_background());
-            tauri::async_runtime::spawn(queue::run(state.clone()));
+            tauri::async_runtime::spawn(queue::run(app.handle().clone(), state.clone()));
             tauri::async_runtime::spawn(telemetry::run(state));
             create_main_window(app)?;
             Ok(())
@@ -81,6 +85,11 @@ pub fn run() {
             commands::disk_free,
             commands::render_preview,
             commands::thumbnail,
+            commands::open_output,
+            commands::reveal_output,
+            commands::open_source,
+            commands::compare_open,
+            commands::compare_close,
             commands::subscribe_jobs,
             commands::subscribe_telemetry,
         ])

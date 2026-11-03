@@ -230,6 +230,22 @@ export function createDemoBackend(): Backend {
     async openExternal(url) {
       window.open(url, "_blank", "noopener,noreferrer");
     },
+    async openOutput() {
+      fail("demo", "Opening files needs the desktop app.");
+    },
+    async revealOutput() {
+      fail("demo", "Showing files needs the desktop app.");
+    },
+    async openSource() {
+      fail("demo", "Opening files needs the desktop app.");
+    },
+    async compareOpen() {
+      return fail("demo", "Comparing finished renders needs the desktop app.");
+    },
+    async compareClose() {},
+    async pickFolder() {
+      return "/Users/demo/Movies/FrameScale";
+    },
     async subscribeJobs(cb) {
       jobSubs.add(cb);
       return () => jobSubs.delete(cb);

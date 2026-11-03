@@ -176,6 +176,12 @@ pub fn encode_segment(
         // 4:2:0 / 4:2:2 need even dimensions; pad by one pixel, never crop.
         vf.push("pad=ceil(iw/2)*2:ceil(ih/2)*2".to_owned());
     }
+    let sar = plan.sample_aspect;
+    if sar.num > 0 && sar.den > 0 && sar.num != sar.den {
+        // Raw frames carry no aspect: without this, anamorphic sources come
+        // out squeezed or stretched (PAL 4:3 at 16:15 would play as 5:4).
+        vf.push(format!("setsar={}/{}", sar.num, sar.den));
+    }
     vf.push(color::from_rgb_filter(&plan.color, &plan.pix_fmt));
     vf.push(format!("format={}", plan.pix_fmt));
     if plan.vaapi_device.is_some() {
@@ -219,6 +225,65 @@ pub fn jpeg_sequence(
         "image2",
     ])
     .arg(pattern);
+    a
+}
+
+/// Decoding starts this long before the requested time, so the frame on
+/// screen at that time is included even for low-frame-rate sources.
+const COMPARE_PREROLL_S: f64 = 0.5;
+
+/// Compare player: `frames` frames of `input` on the output's frame grid,
+/// starting at media time `at_s` (relative to the file start), as a stream of
+/// concatenated JPEGs on stdout. Display-sized when `size` is given, native
+/// resolution otherwise; HDR is tone-mapped for display.
+///
+/// The `fps` filter is anchored at `at_s` instead of the first decoded frame:
+/// each output tick shows the latest input frame at or before it, so a seek
+/// never shifts the result by one frame (millisecond container timestamps,
+/// lower source frame rates).
+#[allow(clippy::too_many_arguments)]
+pub fn compare_frames(
+    input: &Path,
+    stream_index: u32,
+    at_s: f64,
+    frames: u64,
+    fps: fs_types::Rational,
+    size: Option<(u32, u32)>,
+    color: &fs_types::media::ColorProfile,
+    quality: u8,
+) -> Argv {
+    let seek = (at_s - COMPARE_PREROLL_S).max(0.0);
+    let mut a = base("error");
+    if seek > 0.0 {
+        a.args(["-ss", &format!("{seek:.6}")]);
+    }
+    a.arg("-i").arg(input);
+    a.args([
+        "-map",
+        &format!("0:{stream_index}"),
+        "-frames:v",
+        &frames.to_string(),
+    ]);
+    let scale = size.map_or_else(String::new, |(w, h)| {
+        format!(",scale={w}:{h}:flags=bicubic")
+    });
+    let vf = format!(
+        "fps=fps={fps}:start_time={:.6}:round=near{scale},{},{}",
+        at_s - seek,
+        color::to_rgb_filter(color, color.needs_high_precision()),
+        color::display_jpeg_filter(color)
+    );
+    a.args([
+        "-vf",
+        &vf,
+        "-c:v",
+        "mjpeg",
+        "-qmin",
+        "1",
+        "-q:v",
+        &quality.to_string(),
+    ]);
+    a.args(["-f", "image2pipe", "pipe:1"]);
     a
 }
 

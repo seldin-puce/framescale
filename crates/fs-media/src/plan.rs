@@ -176,6 +176,7 @@ pub fn compile(i: &PlanInputs<'_>) -> Result<Planned, PlanError> {
             rate: out_rate,
             color: out_color,
             hdr: sel.hdr,
+            sample_aspect: v.sample_aspect,
         },
         engine: EnginePlan {
             stages: pipe

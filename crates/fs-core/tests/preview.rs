@@ -1,7 +1,7 @@
 //! Preview + thumbnail through the real worker, FFmpeg and models.
 //! Needs FS_FFMPEG, FS_FFPROBE, FS_WORKER (skips otherwise).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use fs_core::preview::{self, PreviewTools};
@@ -143,5 +143,157 @@ async fn preview_and_thumbnail() {
         1,
         "no temp files left"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Mean luma of a JPEG, decoded by FFmpeg (1×1 area average).
+fn luma(ffmpeg: &Path, jpeg: &[u8], dir: &Path) -> u8 {
+    let f = dir.join("probe.jpg");
+    std::fs::write(&f, jpeg).expect("write jpeg");
+    let o = Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&f)
+        .args([
+            "-vf",
+            "scale=1:1:flags=area,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .expect("decode");
+    assert!(
+        o.status.success() && o.stdout.len() == 1,
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    o.stdout[0]
+}
+
+/// Compare sessions: both sides are sampled on the output's frame grid, stay
+/// frame-exact after seeks (also with millisecond MKV timestamps and a lower
+/// source rate), serve native-resolution stills, and stop at the real end.
+#[tokio::test(flavor = "multi_thread")]
+async fn compare_session_streams_aligned_frames() {
+    use fs_core::compare::{CompareSession, FrameError};
+    use fs_types::CompareSide::{After, Before};
+
+    let (Some(ffmpeg), Some(ffprobe)) = (env("FS_FFMPEG"), env("FS_FFPROBE")) else {
+        return eprintln!("skip: FS_FFMPEG/FS_FFPROBE unset");
+    };
+    let dir = std::env::temp_dir().join(format!("fs-compare-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let make = |args: &[&str], out: &PathBuf| {
+        let st = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-y"])
+            .args(args)
+            .arg(out)
+            .status()
+            .expect("gen");
+        assert!(st.success());
+    };
+    // Each frame's luma encodes its index: code = N mod 11.
+    let coded = |s: &str, r: u32| {
+        format!("nullsrc=s={s}:r={r}:d=3,format=yuv420p,geq=lum='16+20*mod(N,11)':cb=128:cr=128")
+    };
+    // Source 320×180 @ 24 fps (MP4); output 640×360 @ 48 fps (MKV, 1 ms timestamps).
+    let src = dir.join("src.mp4");
+    make(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            &coded("320x180", 24),
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            "-color_range",
+            "tv",
+        ],
+        &src,
+    );
+    let out = dir.join("out.mkv");
+    make(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            &coded("640x360", 48),
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            "-color_range",
+            "tv",
+        ],
+        &out,
+    );
+    // Reference level of each code: the source's first 11 frames, decoded directly.
+    let reference = Command::new(&ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&src)
+        .args([
+            "-frames:v",
+            "11",
+            "-vf",
+            "scale=1:1:flags=area,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .expect("reference")
+        .stdout;
+    assert_eq!(reference.len(), 11);
+    let index = |l: u8| {
+        (0..11i64)
+            .min_by_key(|&k| (i16::from(reference[k as usize]) - i16::from(l)).abs())
+            .unwrap_or(-1)
+    };
+
+    let s = CompareSession::open(&ffmpeg, &ffprobe, &src, &out, 4000)
+        .await
+        .expect("open");
+    let i = s.info.clone();
+    assert_eq!((i.width, i.height), (640, 360), "capped to the output size");
+    assert_eq!((i.output_width, i.source_width), (640, 320));
+    assert!((i.fps - 48.0).abs() < 1e-9 && (i.source_fps - 24.0).abs() < 1e-9);
+    assert_eq!(i.frames, 144);
+
+    // Output frame n ↔ output index n; source shows frame floor(n / 2).
+    let check = |n: u64, b: &[u8], a: &[u8]| {
+        assert_eq!(index(luma(&ffmpeg, a, &dir)), (n % 11) as i64, "after #{n}");
+        assert_eq!(
+            index(luma(&ffmpeg, b, &dir)),
+            ((n / 2) % 11) as i64,
+            "before #{n}"
+        );
+    };
+    // Sequential playback from a seek to an odd frame, then a far seek back.
+    for n in (37..60).chain([5, 6, 7, 120, 143]) {
+        let (b, a) = tokio::join!(s.frame(Before, n), s.frame(After, n));
+        check(n, &b.expect("before"), &a.expect("after"));
+    }
+    // Native-resolution stills match the stream.
+    for n in [37, 101] {
+        let (b, a) = tokio::join!(s.still(Before, n), s.still(After, n));
+        check(n, &b.expect("still before"), &a.expect("still after"));
+    }
+    assert_eq!(s.frame(After, 144).await, Err(FrameError::PastEnd));
+
+    // A request superseded by a far seek gives up instead of fighting it.
+    let (late, _) = tokio::join!(s.frame(After, 10), async {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        s.frame(After, 130).await
+    });
+    assert!(
+        matches!(late, Ok(_) | Err(FrameError::Superseded)),
+        "{late:?}"
+    );
+
+    s.close();
+    assert_eq!(s.frame(After, 0).await, Err(FrameError::Closed));
     let _ = std::fs::remove_dir_all(dir);
 }

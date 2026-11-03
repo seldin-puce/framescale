@@ -1,7 +1,7 @@
 import type { JobProgress, JobSummary, MediaInfo } from "@framescale/ipc-types";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CircleCheck, CircleX, Film, GripVertical, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, TriangleAlert } from "lucide-react";
+import { CircleCheck, CircleX, Film, FolderOpen, GripVertical, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, TriangleAlert } from "lucide-react";
 import { useThumbnail } from "@/hooks/useThumbnail";
 import { cn } from "@/lib/cn";
 import { basename, duration } from "@/lib/format";
@@ -87,6 +87,8 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
         isDragging && "z-10 bg-surface-raised shadow-lg",
       )}
       onClick={() => select(job.id)}
+      onDoubleClick={() => s === "done" && useApp.getState().playCompare(job.id)}
+      title={s === "done" ? `${job.spec.output.path}\nDouble-click to play & compare` : undefined}
     >
       {sortable && (
         <button type="button" className="cursor-grab text-fg-subtle hover:text-fg" aria-label="Drag to reorder" {...attributes} {...listeners}>
@@ -104,6 +106,9 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
             {STATE_LABEL[s]}
             {s === "rendering" && progress?.etaS != null ? ` · ${duration(progress.etaS)} left` : ""}
           </span>
+          {s === "done" && (
+            <span className="min-w-0 truncate font-mono text-[10px] text-fg-subtle">→ {basename(job.spec.output.path)}</span>
+          )}
           {(s === "rendering" || s === "paused") && total > 0 && (
             <span className="tabular ml-auto font-mono text-[10px] text-fg-subtle">{Math.round(ratio * 100)}%</span>
           )}
@@ -114,6 +119,13 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
           </div>
         )}
       </div>
+      {s === "done" && (
+        // Finished: the next step stays visible, not hidden behind hover.
+        <div className="flex" onClick={(e) => e.stopPropagation()}>
+          <IconButton icon={Play} label="Play & compare" size="sm" onClick={() => useApp.getState().playCompare(job.id)} />
+          <IconButton icon={FolderOpen} label="Show in folder" size="sm" onClick={() => void useApp.getState().revealOutput(job.id)} />
+        </div>
+      )}
       <div className="flex opacity-0 group-hover:opacity-100 focus-within:opacity-100" onClick={(e) => e.stopPropagation()}>
         {s === "rendering" && <IconButton icon={Pause} label="Pause (keeps GPU memory)" size="sm" onClick={() => void act(job.id, "pause")} />}
         {s === "rendering" && <IconButton icon={Square} label="Pause & free GPU (finishes current segment)" size="sm" onClick={() => void act(job.id, "hardPause")} />}
