@@ -1,6 +1,7 @@
 //! Process-wide state and the startup sequence.
 
 use std::collections::{BTreeSet, HashSet};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -44,6 +45,11 @@ pub struct AppState {
     pub queue_changed: Notify,
     /// Open source-vs-output comparison sessions, by session id.
     pub compare: Mutex<std::collections::VecDeque<Arc<fs_core::compare::CompareSession>>>,
+    /// Bumped by every preview render and by `cancel_preview`: only the
+    /// newest preview runs.
+    pub preview_epoch: AtomicU64,
+    /// Wakes the running preview when `preview_epoch` moves on.
+    pub preview_cancel: Notify,
     pub job_events: broadcast::Sender<JobEvent>,
     pub telemetry: watch::Sender<Telemetry>,
 }
@@ -95,6 +101,8 @@ impl AppState {
             active: Mutex::new(None),
             queue_changed: Notify::new(),
             compare: Mutex::new(std::collections::VecDeque::new()),
+            preview_epoch: AtomicU64::new(0),
+            preview_cancel: Notify::new(),
             job_events,
             telemetry,
         }))

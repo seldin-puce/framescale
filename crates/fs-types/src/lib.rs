@@ -26,5 +26,5 @@ pub use pipeline::{
     Container, EncoderPreference, JobSpec, ModelRef, OutputSpec, PipelineError, PipelineSpec,
     StageConfig, StageKind, VideoCodec,
 };
-pub use preview::{CompareInfo, CompareSide, PreviewResult};
+pub use preview::{CompareInfo, CompareSide, PreviewProgress, PreviewResult};
 pub use telemetry::{DeviceTelemetry, EcoMode, EcoState, Telemetry};

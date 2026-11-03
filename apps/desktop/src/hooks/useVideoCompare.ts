@@ -35,8 +35,10 @@ const quiet = (e: unknown) => e instanceof FrameError && (e.status === 409 || e.
  * - Paused: after a moment the frame is replaced by native-resolution stills,
  *   so zooming in shows real pixels, not the playback downscale.
  * - Single-side modes decode only that side.
+ *
+ * `start`: the frame shown first when a session opens (default 0).
  */
-export function useVideoCompare(info: CompareInfo | null, mode: CompareMode) {
+export function useVideoCompare(info: CompareInfo | null, mode: CompareMode, start = 0) {
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [pair, setPair] = useState<ImagePair | null>(null);
@@ -54,6 +56,8 @@ export function useVideoCompare(info: CompareInfo | null, mode: CompareMode) {
   playingRef.current = playing;
   const session = useRef<string | null>(null);
   session.current = info?.session ?? null;
+  const startRef = useRef(start);
+  startRef.current = start;
 
   const sidesKey = mode === "before" ? "before" : mode === "after" ? "after" : "before,after";
   const capacity = info ? Math.max(16, Math.floor(CACHE_BYTES / (info.width * info.height * 4))) : 0;
@@ -121,15 +125,16 @@ export function useVideoCompare(info: CompareInfo | null, mode: CompareMode) {
     setNative(full);
   }, []);
 
-  // A new comparison starts at the first frame with empty caches.
+  // A new comparison starts at `start` with empty caches.
   useEffect(() => {
     for (const c of [cache.current, stills.current]) {
       for (const p of c.values()) void p.then((b) => b.close(), () => {});
       c.clear();
     }
-    want.current = 0;
+    const k = info ? Math.max(0, Math.min(info.frames - 1, Math.round(startRef.current))) : 0;
+    want.current = k;
     shown.current = null;
-    setFrame(0);
+    setFrame(k);
     setPlaying(false);
     setPair(null);
     setNative(false);

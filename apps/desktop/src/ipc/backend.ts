@@ -10,6 +10,7 @@ import type {
   MediaInfo,
   PauseMode,
   PipelineSpec,
+  PreviewProgress,
   PreviewResult,
   Telemetry,
 } from "@framescale/ipc-types";
@@ -58,8 +59,19 @@ export interface Backend {
   removeJob(id: JobId): Promise<void>;
   reorderJobs(order: JobId[]): Promise<void>;
   setEcoMode(mode: EcoMode): Promise<void>;
-  /** Render `seconds` (0 = one frame, max 2) of `path` from `atS` through `pipeline` (real engine). */
-  renderPreview(path: string, atS: number, seconds: number, pipeline: PipelineSpec): Promise<PreviewResult>;
+  /**
+   * Render `seconds` (0 = one frame, max 2) of `path` from `atS` through `pipeline` (real engine).
+   * `onProgress` hears about frames as they're processed. Starting another preview stops this one.
+   */
+  renderPreview(
+    path: string,
+    atS: number,
+    seconds: number,
+    pipeline: PipelineSpec,
+    onProgress?: (p: PreviewProgress) => void,
+  ): Promise<PreviewResult>;
+  /** Stop the running preview; its promise rejects with code "cancelled". */
+  cancelPreview(): Promise<void>;
   /** Cached JPEG thumbnail; resolves to an `fs://` path for `assetUrl`. */
   thumbnail(path: string): Promise<string>;
   /** URL for an `fs://` path (preview frames, thumbnails). */
@@ -74,6 +86,8 @@ export interface Backend {
   openSource(id: JobId): Promise<void>;
   /** Start a source-vs-output comparison of a finished job. */
   compareOpen(id: JobId, maxWidth: number): Promise<CompareInfo>;
+  /** Show a clip that isn't rendered: frame n is `compare/<session>/before/[full/]<n>.jpg`. Close with `compareClose`. */
+  sourceOpen(path: string, maxWidth: number): Promise<CompareInfo>;
   /** Stop a comparison's decoders (frames: `compare/<session>/<side>/[full/]<n>.jpg`). */
   compareClose(session: string): Promise<void>;
   /** Folder picker for the output destination; null if cancelled. */

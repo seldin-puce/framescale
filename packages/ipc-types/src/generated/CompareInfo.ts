@@ -5,6 +5,9 @@
  * sampled on the output's frame grid (frame n = n / fps), so they stay
  * aligned even when the render interpolated to a higher rate.
  *
+ * A clip that hasn't been rendered opens the same way with the source on
+ * both sides (one decoder); the output fields then describe the source.
+ *
  * Frames are served at `compare/<session>/<side>/<n>.jpg` (playback size)
  * and `compare/<session>/<side>/full/<n>.jpg` (native resolution).
  */

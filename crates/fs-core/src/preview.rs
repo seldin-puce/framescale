@@ -14,7 +14,7 @@ use fs_types::pipeline::{
 use fs_types::worker::{
     PROTOCOL_VERSION, PreviewRequest, StartPoint, WorkerCommand, WorkerEvent, WorkerJob,
 };
-use fs_types::{GpuDevice, JobId, PreviewResult};
+use fs_types::{GpuDevice, JobId, PreviewProgress, PreviewResult};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 pub const PREVIEW_SECONDS: f64 = 2.0;
@@ -40,7 +40,8 @@ fn count_jpegs(dir: &Path) -> u32 {
 
 /// Render `seconds` (≤ [`PREVIEW_SECONDS`]; a single frame if tiny) of `input`
 /// starting at `at_s` into `<root>/<id>/`. Returns the protocol prefix
-/// `preview/<id>` plus metadata.
+/// `preview/<id>` plus metadata. `progress` hears about the frames as the
+/// engine works through them. Dropping the future stops the worker.
 pub async fn render(
     tools: &PreviewTools,
     input: &Path,
@@ -48,6 +49,7 @@ pub async fn render(
     seconds: f64,
     pipeline: &PipelineSpec,
     root: &Path,
+    progress: &(dyn Fn(PreviewProgress) + Send + Sync),
 ) -> Result<PreviewResult, String> {
     let started = Instant::now();
     let (fp, inp) = (tools.ffprobe.clone(), input.to_path_buf());
@@ -120,6 +122,15 @@ pub async fn render(
     let (width, height) = (planned.encode.width, planned.encode.height);
     let fps = planned.encode.rate.as_f64();
     let tone_mapped = planned.decode.color.is_hdr();
+    let report = |started: bool, done: u64, fps: f32| {
+        progress(PreviewProgress {
+            started,
+            done: done.min(window),
+            total: window,
+            fps,
+        });
+    };
+    report(false, 0, 0.0);
 
     let mut cmd = std::process::Command::new(&tools.worker);
     cmd.stdin(Stdio::piped())
@@ -157,6 +168,7 @@ pub async fn render(
     let mut backend = String::from("unknown");
     let mut device = None;
     let mut error = None;
+    let mut last_fps = 0.0;
     let mut lines = BufReader::new(child.stdout.take().ok_or("no worker stdout")?).lines();
     while let Ok(Some(l)) = lines.next_line().await {
         match serde_json::from_str::<WorkerEvent>(&l) {
@@ -167,7 +179,13 @@ pub async fn render(
             }) => {
                 backend = b;
                 device = device_name;
+                report(true, 0, 0.0);
             }
+            Ok(WorkerEvent::Progress { frames_in, fps, .. }) => {
+                last_fps = fps;
+                report(true, frames_in, fps);
+            }
+            Ok(WorkerEvent::Finished { frames_in, .. }) => report(true, frames_in, last_fps),
             Ok(WorkerEvent::Error { message, .. }) => error = Some(message),
             _ => {}
         }

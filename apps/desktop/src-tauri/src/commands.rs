@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use fs_core::JobCommand;
 use fs_types::{
@@ -179,8 +180,29 @@ fn validate_pipeline(pipeline: &fs_types::PipelineSpec) -> R<()> {
         .map_err(|e| err("invalidPipeline", format!("{e:?}")))
 }
 
+/// Resolves once a newer preview (or `cancel_preview`) has replaced `epoch`.
+async fn preview_superseded(state: &AppState, epoch: u64) {
+    loop {
+        let changed = state.preview_cancel.notified();
+        tokio::pin!(changed);
+        changed.as_mut().enable();
+        if state.preview_epoch.load(Ordering::SeqCst) != epoch {
+            return;
+        }
+        changed.await;
+    }
+}
+
+/// Stop the running preview render, if any (its worker is killed).
+#[tauri::command]
+pub fn cancel_preview(state: S<'_>) {
+    state.preview_epoch.fetch_add(1, Ordering::SeqCst);
+    state.preview_cancel.notify_waiters();
+}
+
 /// Render a 2 s preview of `path` at `at_s` with the given pipeline. The
-/// result's `prefix` is served through the `fs://` protocol.
+/// result's `prefix` is served through the `fs://` protocol. Progress streams
+/// over `on_progress`. One preview runs at a time: starting one stops the last.
 #[tauri::command]
 pub async fn render_preview(
     state: S<'_>,
@@ -188,8 +210,11 @@ pub async fn render_preview(
     at_s: f64,
     seconds: f64,
     pipeline: fs_types::PipelineSpec,
+    on_progress: Channel<fs_types::PreviewProgress>,
 ) -> R<fs_types::PreviewResult> {
     validate_pipeline(&pipeline)?;
+    let epoch = state.preview_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    state.preview_cancel.notify_waiters();
     let tools = fs_core::preview::PreviewTools {
         ffmpeg: state.paths.ffmpeg.clone(),
         ffprobe: state.paths.ffprobe.clone(),
@@ -199,15 +224,26 @@ pub async fn render_preview(
     };
     fs_core::preview::prune(&state.paths.previews, 6);
     tracing::info!(%path, at_s, seconds, stages = pipeline.stages.len(), "rendering preview");
-    let res = fs_core::preview::render(
+    let report = |p: fs_types::PreviewProgress| {
+        let _ = on_progress.send(p);
+    };
+    let input = PathBuf::from(&path);
+    let render = fs_core::preview::render(
         &tools,
-        &PathBuf::from(&path),
+        &input,
         at_s,
         seconds,
         &pipeline,
         &state.paths.previews,
-    )
-    .await;
+        &report,
+    );
+    let res = tokio::select! {
+        r = render => r,
+        () = preview_superseded(&state, epoch) => {
+            tracing::info!(%path, "preview cancelled");
+            return Err(err("cancelled", "preview cancelled"));
+        }
+    };
     match res {
         Ok(r) => {
             tracing::info!(
@@ -296,6 +332,44 @@ pub fn open_source(app: tauri::AppHandle, state: S<'_>, id: JobId) -> R<()> {
         .map_err(|e| err("open", e.to_string()))
 }
 
+/// Keep a newly opened viewer session; older ones are closed.
+fn keep_session(
+    state: &AppState,
+    session: fs_core::compare::CompareSession,
+) -> fs_types::CompareInfo {
+    let info = session.info.clone();
+    if let Ok(mut open) = state.compare.lock() {
+        open.push_back(Arc::new(session));
+        // One viewer: older sessions only linger while the UI switches over.
+        while open.len() > 2 {
+            if let Some(old) = open.pop_front() {
+                old.close();
+            }
+        }
+    }
+    info
+}
+
+/// Show a clip that hasn't been rendered (the frame under the preview
+/// marker): a source-only session on the same frame server as
+/// `compare_open`, so `compare/<session>/before/<n>.jpg` is source frame n.
+#[tauri::command]
+pub async fn source_open(state: S<'_>, path: String, max_width: u32) -> R<fs_types::CompareInfo> {
+    let source = PathBuf::from(&path);
+    if !source.is_file() {
+        return Err(err("notFound", format!("{path} was moved or deleted")));
+    }
+    let session = fs_core::compare::CompareSession::open_source(
+        &state.paths.ffmpeg,
+        &state.paths.ffprobe,
+        &source,
+        max_width,
+    )
+    .await
+    .map_err(|e| err("compare", e))?;
+    Ok(keep_session(&state, session))
+}
+
 /// Start comparing a finished render with its source. Frames are served by
 /// the `fs://` protocol (`compare/<session>/…`, see `protocol.rs`).
 #[tauri::command]
@@ -317,17 +391,7 @@ pub async fn compare_open(state: S<'_>, id: JobId, max_width: u32) -> R<fs_types
     )
     .await
     .map_err(|e| err("compare", e))?;
-    let info = session.info.clone();
-    if let Ok(mut open) = state.compare.lock() {
-        open.push_back(Arc::new(session));
-        // One viewer: older sessions only linger while the UI switches over.
-        while open.len() > 2 {
-            if let Some(old) = open.pop_front() {
-                old.close();
-            }
-        }
-    }
-    Ok(info)
+    Ok(keep_session(&state, session))
 }
 
 /// Stop a comparison's decoders.

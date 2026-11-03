@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use fs_core::preview::{self, PreviewTools};
+use fs_types::PreviewProgress;
 use fs_types::pipeline::{ModelRef, PipelineSpec, StageConfig};
 
 fn env(k: &str) -> Option<PathBuf> {
@@ -87,10 +88,22 @@ async fn preview_and_thumbnail() {
         ],
     };
     let root = dir.join("previews");
-    let r = preview::render(&tools, &sdr, 2.0, 2.0, &pipeline, &root)
+    let seen = std::sync::Mutex::new(Vec::<PreviewProgress>::new());
+    let record = |p: PreviewProgress| seen.lock().expect("lock").push(p);
+    let r = preview::render(&tools, &sdr, 2.0, 2.0, &pipeline, &root, &record)
         .await
         .expect("preview");
     eprintln!("{r:?}");
+    // Progress: known total up front, then engine start, ending complete.
+    let seen = seen.into_inner().expect("progress");
+    assert!(
+        seen.iter().all(|p| p.total == 48 && p.done <= 48),
+        "{seen:?}"
+    );
+    assert!(!seen[0].started, "the first report precedes the engine");
+    assert!(seen.iter().any(|p| p.started), "{seen:?}");
+    let last = seen.last().expect("reports");
+    assert_eq!((last.done, last.total), (48, 48), "{seen:?}");
     assert_eq!(r.before_frames, 48, "2 s at 24 fps");
     assert_eq!(r.after_frames, 96, "×2 interpolation");
     assert_eq!((r.width, r.height), (640, 360));
@@ -103,7 +116,7 @@ async fn preview_and_thumbnail() {
     assert!(std::fs::metadata(&first).expect("jpeg").len() > 1000);
 
     // Near the end: the window is clamped so a full 2 s still renders.
-    let late = preview::render(&tools, &sdr, 5.9, 2.0, &pipeline, &root)
+    let late = preview::render(&tools, &sdr, 5.9, 2.0, &pipeline, &root, &|_| {})
         .await
         .expect("late");
     assert_eq!(late.before_frames, 48);
@@ -114,7 +127,7 @@ async fn preview_and_thumbnail() {
             scale: 2,
         }],
     };
-    let h = preview::render(&tools, &hdr, 0.0, 2.0, &up, &root)
+    let h = preview::render(&tools, &hdr, 0.0, 2.0, &up, &root, &|_| {})
         .await
         .expect("hdr preview");
     assert!(h.tone_mapped);
@@ -133,7 +146,7 @@ async fn preview_and_thumbnail() {
             },
         ],
     };
-    let d = preview::render(&tools, &sdr, 1.0, 0.5, &dn, &root)
+    let d = preview::render(&tools, &sdr, 1.0, 0.5, &dn, &root, &|_| {})
         .await
         .expect("denoise preview");
     assert_eq!(
@@ -144,7 +157,7 @@ async fn preview_and_thumbnail() {
     assert_eq!(d.after_frames, d.before_frames);
 
     // A single-frame "still" (shown first while the full 2 s renders).
-    let still = preview::render(&tools, &sdr, 3.0, 0.0, &up, &root)
+    let still = preview::render(&tools, &sdr, 3.0, 0.0, &up, &root, &|_| {})
         .await
         .expect("still");
     assert_eq!((still.before_frames, still.after_frames), (1, 1));
@@ -318,5 +331,27 @@ async fn compare_session_streams_aligned_frames() {
 
     s.close();
     assert_eq!(s.frame(After, 0).await, Err(FrameError::Closed));
+
+    // A clip that hasn't been rendered: the source alone, on its own grid,
+    // with one decoder behind both sides.
+    let s = CompareSession::open_source(&ffmpeg, &ffprobe, &src, 4000)
+        .await
+        .expect("open source");
+    let i = s.info.clone();
+    assert_eq!((i.width, i.height, i.frames), (320, 180, 72));
+    assert!((i.fps - 24.0).abs() < 1e-9);
+    for n in (30..40).chain([3, 71]) {
+        let (b, a) = tokio::join!(s.frame(Before, n), s.frame(After, n));
+        let (b, a) = (b.expect("before"), a.expect("after"));
+        assert_eq!(b, a, "one decoder serves both sides");
+        assert_eq!(
+            index(luma(&ffmpeg, &b, &dir)),
+            (n % 11) as i64,
+            "source #{n}"
+        );
+    }
+    let full = s.still(Before, 12).await.expect("still");
+    assert_eq!(index(luma(&ffmpeg, &full, &dir)), 1, "source #12");
+    assert_eq!(s.frame(Before, 72).await, Err(FrameError::PastEnd));
     let _ = std::fs::remove_dir_all(dir);
 }

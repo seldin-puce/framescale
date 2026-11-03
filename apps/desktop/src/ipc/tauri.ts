@@ -1,4 +1,4 @@
-import type { JobEvent, Telemetry } from "@framescale/ipc-types";
+import type { JobEvent, PreviewProgress, Telemetry } from "@framescale/ipc-types";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -23,7 +23,12 @@ export const tauriBackend: Backend = {
   removeJob: (id) => invoke("remove_job", { id }),
   reorderJobs: (order) => invoke("reorder_jobs", { order }),
   setEcoMode: (mode) => invoke("set_eco_mode", { mode }),
-  renderPreview: (path, atS, seconds, pipeline) => invoke("render_preview", { path, atS, seconds, pipeline }),
+  renderPreview(path, atS, seconds, pipeline, onProgress) {
+    const channel = new Channel<PreviewProgress>();
+    if (onProgress) channel.onmessage = onProgress;
+    return invoke("render_preview", { path, atS, seconds, pipeline, onProgress: channel });
+  },
+  cancelPreview: () => invoke("cancel_preview"),
   thumbnail: (path) => invoke("thumbnail", { path }),
   // Custom protocols are `scheme://localhost/…` on macOS/Linux and
   // `http://scheme.localhost/…` on Windows (WebView2).
@@ -77,6 +82,7 @@ export const tauriBackend: Backend = {
   revealOutput: (id) => invoke("reveal_output", { id }),
   openSource: (id) => invoke("open_source", { id }),
   compareOpen: (id, maxWidth) => invoke("compare_open", { id, maxWidth: Math.round(maxWidth) }),
+  sourceOpen: (path, maxWidth) => invoke("source_open", { path, maxWidth: Math.round(maxWidth) }),
   compareClose: (session) => invoke("compare_close", { session }),
   async pickFolder() {
     const r = await open({ directory: true, multiple: false });

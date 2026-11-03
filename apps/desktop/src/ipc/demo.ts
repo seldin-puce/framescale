@@ -223,6 +223,7 @@ export function createDemoBackend(): Backend {
     async renderPreview() {
       return fail("demo", "Previews run the real engine. Open FrameScale as the desktop app to render one.");
     },
+    async cancelPreview() {},
     async thumbnail() {
       return "";
     },
@@ -241,6 +242,9 @@ export function createDemoBackend(): Backend {
     },
     async compareOpen() {
       return fail("demo", "Comparing finished renders needs the desktop app.");
+    },
+    async sourceOpen() {
+      return fail("demo", "Showing your clip needs the desktop app.");
     },
     async compareClose() {},
     async pickFolder() {

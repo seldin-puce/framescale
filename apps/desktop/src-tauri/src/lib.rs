@@ -89,6 +89,8 @@ pub fn run() {
             commands::reveal_output,
             commands::open_source,
             commands::compare_open,
+            commands::source_open,
+            commands::cancel_preview,
             commands::compare_close,
             commands::subscribe_jobs,
             commands::subscribe_telemetry,

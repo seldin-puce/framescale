@@ -7,6 +7,7 @@ import type {
   JobSpec,
   JobSummary,
   MediaInfo,
+  PreviewProgress,
   PreviewResult,
   StageConfig,
   StageKind,
@@ -120,6 +121,11 @@ export interface Draft {
   error: string | null;
 }
 
+/** A preview render in flight: first a single frame, then the full 2 s. */
+export interface PreviewRun extends PreviewProgress {
+  phase: "first" | "full";
+}
+
 export interface PreviewState {
   status: "idle" | "rendering" | "ready" | "error";
   /** Source the preview belongs to (stale once the selection changes). */
@@ -128,6 +134,8 @@ export interface PreviewState {
   error: string | null;
   /** A single-frame still is shown while the full 2 s renders. */
   refining: boolean;
+  /** Progress of the render in flight; null when none runs. */
+  run: PreviewRun | null;
 }
 
 let previewToken = 0;
@@ -181,6 +189,8 @@ interface AppStore {
 
   init(): Promise<void>;
   renderPreview(atS: number): Promise<void>;
+  /** Stop the preview render in flight (a first frame that already arrived stays). */
+  cancelPreview(): void;
   selectedSource(): { path: string; info: MediaInfo | null } | null;
   addFiles(paths: string[]): Promise<void>;
   removeDraft(path: string): void;
@@ -234,7 +244,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   outputDir: loadOutputDir(),
   autoplay: null,
   toast: null,
-  preview: { status: "idle", path: null, result: null, error: null, refining: false },
+  preview: { status: "idle", path: null, result: null, error: null, refining: false, run: null },
 
   selectedSource() {
     const { selected, drafts, jobs } = get();
@@ -253,21 +263,37 @@ export const useApp = create<AppStore>()((set, get) => ({
     const token = ++previewToken;
     const pipeline = { stages: toStageConfigs(get().stages) };
     const current = () => token === previewToken && get().preview.path === src.path;
-    set({ preview: { status: "rendering", path: src.path, result: null, error: null, refining: false } });
+    const report = (phase: PreviewRun["phase"]) => (p: PreviewProgress) => {
+      if (current()) set((s) => ({ preview: { ...s.preview, run: { ...p, phase } } }));
+    };
+    const waiting = (phase: PreviewRun["phase"]): PreviewRun => ({ phase, started: false, done: 0, total: 0, fps: 0 });
+    set({ preview: { status: "rendering", path: src.path, result: null, error: null, refining: false, run: waiting("first") } });
     try {
-      const still = await backend.renderPreview(src.path, atS, 0, pipeline);
+      const still = await backend.renderPreview(src.path, atS, 0, pipeline, report("first"));
       if (!current()) return;
-      set({ preview: { status: "ready", path: src.path, result: still, error: null, refining: true } });
-      const full = await backend.renderPreview(src.path, atS, 2, pipeline);
+      set({ preview: { status: "ready", path: src.path, result: still, error: null, refining: true, run: waiting("full") } });
+      const full = await backend.renderPreview(src.path, atS, 2, pipeline, report("full"));
       if (!current()) return;
-      set({ preview: { status: "ready", path: src.path, result: full, error: null, refining: false } });
+      set({ preview: { status: "ready", path: src.path, result: full, error: null, refining: false, run: null } });
     } catch (e) {
       if (!current()) return;
-      const message = isCmdError(e) ? e.message : String(e);
       const keep = get().preview.result;
-      set({ preview: { status: keep ? "ready" : "error", path: src.path, result: keep, error: message, refining: false } });
+      if (isCmdError(e) && e.code === "cancelled") {
+        set({ preview: { status: keep ? "ready" : "idle", path: src.path, result: keep, error: null, refining: false, run: null } });
+        return;
+      }
+      const message = isCmdError(e) ? e.message : String(e);
+      set({ preview: { status: keep ? "ready" : "error", path: src.path, result: keep, error: message, refining: false, run: null } });
       get().fail(e);
     }
+  },
+
+  cancelPreview() {
+    const p = get().preview;
+    if (!p.run) return;
+    previewToken++; // the pending render resolves into nothing
+    set({ preview: { ...p, status: p.result ? "ready" : "idle", refining: false, run: null } });
+    void backend.cancelPreview();
   },
 
   async init() {

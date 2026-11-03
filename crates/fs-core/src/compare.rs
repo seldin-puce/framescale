@@ -14,6 +14,9 @@
 //!
 //! Both sides are sampled on the output's frame grid (frame n = n / fps), so
 //! they stay aligned even when the render interpolated to a higher rate.
+//!
+//! A clip that hasn't been rendered yet opens as a source-only session: both
+//! sides are the same decoder, on the source's own frame grid.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -338,6 +341,29 @@ impl CompareSession {
             probe_async(ffprobe, source).await?,
             probe_async(ffprobe, output).await?,
         );
+        Self::new(ffmpeg, (source, &src), Some((output, &out)), max_width)
+    }
+
+    /// A clip on its own (not rendered yet): both sides show the source,
+    /// decoded once, on its own frame grid.
+    pub async fn open_source(
+        ffmpeg: &Path,
+        ffprobe: &Path,
+        source: &Path,
+        max_width: u32,
+    ) -> Result<Self, String> {
+        let src = probe_async(ffprobe, source).await?;
+        Self::new(ffmpeg, (source, &src), None, max_width)
+    }
+
+    fn new(
+        ffmpeg: &Path,
+        (source, src): (&Path, &MediaInfo),
+        output: Option<(&Path, &MediaInfo)>,
+        max_width: u32,
+    ) -> Result<Self, String> {
+        let shared = output.is_none();
+        let (output, out) = output.unwrap_or((source, src));
         let fps = rate::conform_rate(Some(out.video.r_frame_rate), Some(out.video.avg_frame_rate));
         if fps.num <= 0 || fps.den <= 0 {
             return Err(format!("{} has no usable frame rate", output.display()));
@@ -355,8 +381,12 @@ impl CompareSession {
         let width = even(display_w.min(f64::from(max_width.clamp(64, MAX_WIDTH))));
         let height = even(f64::from(width) * f64::from(oh) / display_w);
 
-        let after = Side::new(&out, output);
-        let before = Side::new(&src, source);
+        let before = Arc::new(Side::new(src, source));
+        let after = if shared {
+            Arc::clone(&before)
+        } else {
+            Arc::new(Side::new(out, output))
+        };
         let duration = if out.duration_s > 0.0 {
             out.duration_s
         } else {
@@ -393,7 +423,7 @@ impl CompareSession {
                 behind: per_s.max(8),
                 max_bytes: 192 << 20,
             },
-            sides: [Arc::new(before), Arc::new(after)],
+            sides: [before, after],
         })
     }
 

@@ -27,6 +27,23 @@ pub struct PreviewResult {
     pub tone_mapped: bool,
 }
 
+/// Live progress of a preview render, streamed while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreviewProgress {
+    /// The engine has loaded its models and frames are flowing.
+    pub started: bool,
+    /// Source frames processed so far.
+    #[ts(type = "number")]
+    pub done: u64,
+    /// Source frames in the preview window.
+    #[ts(type = "number")]
+    pub total: u64,
+    /// Recent processing rate, source frames per second (0 until known).
+    pub fps: f32,
+}
+
 /// Which video a comparison frame comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +58,9 @@ pub enum CompareSide {
 /// A source-vs-output comparison of a finished render. Both sides are
 /// sampled on the output's frame grid (frame n = n / fps), so they stay
 /// aligned even when the render interpolated to a higher rate.
+///
+/// A clip that hasn't been rendered opens the same way with the source on
+/// both sides (one decoder); the output fields then describe the source.
 ///
 /// Frames are served at `compare/<session>/<side>/<n>.jpg` (playback size)
 /// and `compare/<session>/<side>/full/<n>.jpg` (native resolution).
