@@ -36,6 +36,7 @@ own licenses apply to those components. This file ships inside the application b
 | Real-ESRGAN (x4plus, x4plus-anime, animevideov3) | BSD-3-Clause | https://github.com/xinntao/Real-ESRGAN |
 | Real-ESRGAN General v3 (realesr-general-x4v3 + wdn), converted to ncnn at build time from the official v0.2.5.0 weights | BSD-3-Clause, © 2021 Xintao Wang | https://github.com/xinntao/Real-ESRGAN |
 | Real-CUGAN (se, pro) | MIT | https://github.com/bilibili/ailab / nihui/realcugan-ncnn-vulkan |
+| NAFNet-SIDD-width32, converted to ncnn at build time | MIT, © 2022 megvii-model (its LICENSE, shipped in `models/nafnet/`, also carries BasicSR's Apache-2.0 notice) | https://github.com/megvii-research/NAFNet (weights via huggingface.co/nyanko7/nafnet-models, SHA-256 pinned) |
 | RIFE 4.6, 4.22 lite, 4.25, 4.26 | MIT, © 2021 hzwer (weights); ncnn conversions MIT, © 2020 nihui | https://github.com/hzwer/Practical-RIFE / nihui/rife-ncnn-vulkan / TNTwise/rife-ncnn-vulkan (commit `13338e3`) |
 | YuNet face detector (2023mar), ncnn conversion | MIT, © 2020 Shiqi Yu | https://github.com/opencv/opencv_zoo / huggingface.co/lightcella/face-pipeline-ncnn |
 | CodeFormer (face restoration), ncnn conversion | **S-Lab License 1.0: non-commercial use only**, © 2022 S-Lab | https://github.com/sczhou/CodeFormer (weights) / https://github.com/FeiGeChuanShu/CodeFormer-ncnn (ncnn conversion, commit `cfe0fe2`) |

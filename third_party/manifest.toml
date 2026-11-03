@@ -198,6 +198,30 @@ sha256 = "1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68"
 select  = ["rife-v4.6/"]
 dest    = "rife"
 
+# NAFNet-SIDD-width32 (megvii, MIT; its LICENSE also carries BasicSR's
+# Apache-2.0 notice): denoising trained on real camera noise (SIDD). The
+# official weights live on Google Drive, so this pins a Hugging Face mirror by
+# commit and SHA-256; a second, independent mirror
+# (WAS/was-node-suite-weights) holds the byte-identical file. Converted to
+# ncnn at build time (`convert = "nafnet"`, fp16 weights, 58 MB); its
+# LayerNorm runs as FrameScale's `fs.ChannelNorm` custom layer.
+[[models]]
+id      = "nafnet"
+license = "MIT"
+url     = "https://huggingface.co/nyanko7/nafnet-models/resolve/08e8c701eb662688cccda3bf3074e90e902bcd3b/NAFNet-SIDD-width32.pth"
+sha256  = "89c70e808d1783b6c07911306e106aaf0d4f7f3da8c61078b99ff7f8929a26f4"
+convert = "nafnet"
+file    = "NAFNet-SIDD-width32"
+dest    = "nafnet"
+
+[[models]]
+id      = "nafnet"
+license = "MIT"
+url     = "https://raw.githubusercontent.com/megvii-research/NAFNet/2b4af71ebe098a92a75910c233a3965a3e93ede4/LICENSE"
+sha256  = "a29ecef3456149898f08e4c71b11b33e7d333664e087bc212e84e18ddd6599ad"
+file    = "LICENSE"
+dest    = "nafnet"
+
 # Newer RIFE (Practical-RIFE 4.22 lite / 4.25 / 4.26, hzwer, MIT), ncnn
 # conversions from TNTwise/rife-ncnn-vulkan (MIT fork of nihui's). Same
 # inputs and custom rife.Warp layer as 4.6; 4.25 and 4.26 need frames padded

@@ -52,6 +52,7 @@ plus CPU-side conversion; excludes decode/encode):
 | Real-ESRGAN x4plus ×2, 1920×1080 → 3840×2160 | 0.31 |
 | Real-ESRGAN General v3 ×4, 960×540 → 3840×2160 | **13.5** |
 | Real-ESRGAN General v3 ×2, 1920×1080 → 3840×2160 | 2.4 |
+| NAFNet-SIDD denoise, 720×576 / 1920×1080 | 26.8 / 7.1 |
 | RIFE 4.6, 1920×1080 | 15.6 |
 | RIFE 4.22 lite / 4.25 / 4.26, 1920×1080 | 14.5 / 14.1 / 14.3 |
 | RIFE 4.6, 3840×2160 | 3.0 |
@@ -105,6 +106,19 @@ than the 9070 XT, which the default ranking correctly avoids.
   fidelity slider is real. Measured: about 240 ms per face on RX 9070 XT,
   2.2 s per face on CPU. Faces aren't tracked across frames (no temporal
   smoothing yet).
+- **NAFNet denoise** (done, live action): NAFNet-SIDD-width32 (megvii, MIT;
+  trained on real camera noise) is converted at build time like General v3
+  (`convert = "nafnet"`, fp16 weights, 58 MB). On the CPU it matches megvii's
+  own PyTorch code to max 1 level; on the GPU too. Two ncnn pitfalls on the
+  way: its Vulkan `Reduction` dispatches one workgroup row per output, and
+  Vulkan caps that at 65535, so a channel reduction over a tile larger than
+  256×256 left most pixels uncomputed. And a stored squared feature map can
+  overflow fp16. LayerNorm2d therefore runs as our `fs.ChannelNorm` custom
+  layer (one thread per pixel, statistics in fp32 registers, 2-D dispatch).
+  Its channel attention averages over each tile, so tiles are twice the SR
+  tile and split evenly (no thin remainder tiles): mean 0.44 / max 6 levels
+  from a whole-frame run, no visible blocks. Strength levels mix 40 / 60 /
+  80 / 100 % of the network's output with the input.
 - Windows CPU path (done): MSVC builds have no OpenMP (vcomp140.dll would need
   the dynamic CRT), so ncnn runs each call single-threaded and the backend
   runs one tile per core (`cores/2`, at most 8; about 8 tiles per worker).

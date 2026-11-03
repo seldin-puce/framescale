@@ -319,6 +319,12 @@ fn interpret(pk: &[u8]) -> Result<V> {
     }
 }
 
+/// For the converter's tests.
+#[cfg(test)]
+pub fn f16_to_f32_pub(h: u16) -> f32 {
+    f16_to_f32(h)
+}
+
 fn f16_to_f32(h: u16) -> f32 {
     let sign = u32::from(h >> 15) << 31;
     let exp = u32::from((h >> 10) & 0x1f);

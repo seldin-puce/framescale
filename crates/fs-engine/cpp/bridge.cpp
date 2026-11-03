@@ -184,6 +184,155 @@ private:
 };
 ncnn::Layer* warp_creator(void*) { return new Warp; }
 
+// ---------------------------------------------------------------------------
+// fs.ChannelNorm: LayerNorm across channels at every pixel (NAFNet's
+// LayerNorm2d, affine folded into the next 1×1 conv). One GPU thread per pixel
+// keeps mean and variance in fp32 registers: no squared map is stored (fp16
+// would overflow), and the dispatch is 2-D, not one workgroup per pixel
+// (ncnn's Reduction tops out at 65535 outputs per dispatch row).
+// Param 0: eps (default 1e-6).
+// ---------------------------------------------------------------------------
+const char* const kChannelNormPack1 = R"glsl(
+#version 450
+layout(binding = 0) readonly buffer bottom_blob { sfp bottom_data[]; };
+layout(binding = 1) writeonly buffer top_blob { sfp top_data[]; };
+layout(push_constant) uniform parameter { int w; int h; int c; int cstep; float eps; } p;
+void main()
+{
+    int gx = int(gl_GlobalInvocationID.x);
+    int gy = int(gl_GlobalInvocationID.y);
+    if (gx >= p.w || gy >= p.h) return;
+    int i = gy * p.w + gx;
+    float sum = 0.0;
+    for (int q = 0; q < p.c; q++) sum += float(buffer_ld1(bottom_data, q * p.cstep + i));
+    float mean = sum / float(p.c);
+    float sq = 0.0;
+    for (int q = 0; q < p.c; q++) {
+        float d = float(buffer_ld1(bottom_data, q * p.cstep + i)) - mean;
+        sq += d * d;
+    }
+    float inv = inversesqrt(sq / float(p.c) + p.eps);
+    for (int q = 0; q < p.c; q++) {
+        float d = float(buffer_ld1(bottom_data, q * p.cstep + i)) - mean;
+        buffer_st1(top_data, q * p.cstep + i, afp(d * inv));
+    }
+}
+)glsl";
+
+const char* const kChannelNormPack4 = R"glsl(
+#version 450
+layout(binding = 0) readonly buffer bottom_blob { sfpvec4 bottom_data[]; };
+layout(binding = 1) writeonly buffer top_blob { sfpvec4 top_data[]; };
+layout(push_constant) uniform parameter { int w; int h; int c; int cstep; float eps; } p;
+void main()
+{
+    int gx = int(gl_GlobalInvocationID.x);
+    int gy = int(gl_GlobalInvocationID.y);
+    if (gx >= p.w || gy >= p.h) return;
+    int i = gy * p.w + gx;
+    vec4 sum = vec4(0.0);
+    for (int q = 0; q < p.c; q++) sum += vec4(buffer_ld4(bottom_data, q * p.cstep + i));
+    float mean = (sum.x + sum.y + sum.z + sum.w) / float(p.c * 4);
+    float sq = 0.0;
+    for (int q = 0; q < p.c; q++) {
+        vec4 d = vec4(buffer_ld4(bottom_data, q * p.cstep + i)) - mean;
+        sq += dot(d, d);
+    }
+    float inv = inversesqrt(sq / float(p.c * 4) + p.eps);
+    for (int q = 0; q < p.c; q++) {
+        vec4 d = vec4(buffer_ld4(bottom_data, q * p.cstep + i)) - mean;
+        buffer_st4(top_data, q * p.cstep + i, afpvec4(d * inv));
+    }
+}
+)glsl";
+
+class ChannelNorm : public ncnn::Layer {
+public:
+    ChannelNorm() {
+        one_blob_only = true;
+        support_vulkan = true;
+        support_vulkan_packing = true;
+    }
+
+    int load_param(const ncnn::ParamDict& pd) override {
+        eps_ = pd.get(0, 1e-6f);
+        return 0;
+    }
+
+    int create_pipeline(const ncnn::Option& opt) override {
+        if (!vkdev) return 0;
+        for (int pack : {1, 4}) {
+            const char* src = pack == 4 ? kChannelNormPack4 : kChannelNormPack1;
+            std::vector<uint32_t> spirv;
+            int r = ncnn::compile_spirv_module(src, (int)std::strlen(src), opt, spirv);
+            if (r != 0) return r;
+            auto* pipeline = new ncnn::Pipeline(vkdev);
+            pipeline->set_optimal_local_size_xyz(8, 8, 1);
+            r = pipeline->create(spirv.data(), spirv.size() * 4, {});
+            if (r != 0) {
+                delete pipeline;
+                return r;
+            }
+            (pack == 4 ? pack4_ : pack1_) = pipeline;
+        }
+        return 0;
+    }
+
+    int destroy_pipeline(const ncnn::Option&) override {
+        delete pack1_;
+        delete pack4_;
+        pack1_ = pack4_ = nullptr;
+        return 0;
+    }
+
+    int forward(const ncnn::Mat& bottom, ncnn::Mat& top, const ncnn::Option& opt) const override {
+        const int w = bottom.w, h = bottom.h, c = bottom.c;
+        top.create(w, h, c, bottom.elemsize, opt.blob_allocator);
+        if (top.empty()) return -100;
+        const int size = w * h;
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int i = 0; i < size; i++) {
+            float sum = 0.f;
+            for (int q = 0; q < c; q++) sum += bottom.channel(q)[i];
+            const float mean = sum / c;
+            float sq = 0.f;
+            for (int q = 0; q < c; q++) {
+                const float d = bottom.channel(q)[i] - mean;
+                sq += d * d;
+            }
+            const float inv = 1.f / std::sqrt(sq / c + eps_);
+            for (int q = 0; q < c; q++) top.channel(q)[i] = (bottom.channel(q)[i] - mean) * inv;
+        }
+        return 0;
+    }
+
+    int forward(const ncnn::VkMat& bottom, ncnn::VkMat& top, ncnn::VkCompute& cmd,
+                const ncnn::Option& opt) const override {
+        top.create(bottom.w, bottom.h, bottom.c, bottom.elemsize, bottom.elempack, opt.blob_vkallocator);
+        if (top.empty()) return -100;
+        std::vector<ncnn::VkMat> bindings{bottom, top};
+        std::vector<ncnn::vk_constant_type> constants(5);
+        constants[0].i = top.w;
+        constants[1].i = top.h;
+        constants[2].i = top.c;
+        constants[3].i = (int)top.cstep;
+        constants[4].f = eps_;
+        ncnn::VkMat dispatcher;
+        dispatcher.w = top.w;
+        dispatcher.h = top.h;
+        dispatcher.c = 1;
+        cmd.record_pipeline(bottom.elempack == 4 ? pack4_ : pack1_, bindings, constants, dispatcher);
+        return 0;
+    }
+
+private:
+    float eps_ = 1e-6f;
+    ncnn::Pipeline* pack1_ = nullptr;
+    ncnn::Pipeline* pack4_ = nullptr;
+};
+
+ncnn::Layer* channel_norm_creator(void*) { return new ChannelNorm; }
+
 std::once_flag g_gpu_once;
 int32_t g_gpu_count = -1;
 
@@ -254,6 +403,7 @@ Model::Model(int32_t gpu, bool fp16, int32_t threads) : net_(new ncnn::Net), gpu
     o.lightmode = true;
     if (gpu >= 0) net_->set_vulkan_device(gpu);
     net_->register_custom_layer("rife.Warp", warp_creator);
+    net_->register_custom_layer("fs.ChannelNorm", channel_norm_creator);
 }
 
 Model::~Model() { net_->clear(); }

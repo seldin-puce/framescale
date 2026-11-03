@@ -180,16 +180,54 @@ pub fn tiled_into(
     out: &mut Planar,
     run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<(), EngineError> {
+    let tile = tile.max(16);
+    tiled_grid(img, (tile, tile), pad, scale, workers, out, run)
+}
+
+/// [`tiled_into`] with the frame split into equal tiles of at most `tile` px
+/// a side, instead of full tiles plus a thin remainder. For networks whose
+/// tiles see tile-wide statistics (NAFNet's channel attention): every tile
+/// then averages over a similar area, which keeps neighbours consistent.
+pub fn tiled_into_even(
+    img: &Planar,
+    tile: usize,
+    pad: usize,
+    scale: usize,
+    workers: usize,
+    out: &mut Planar,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
+) -> Result<(), EngineError> {
+    let tile = tile.max(16);
+    let even = |n: usize| n.div_ceil(n.div_ceil(tile)).max(1);
+    tiled_grid(
+        img,
+        (even(img.w), even(img.h)),
+        pad,
+        scale,
+        workers,
+        out,
+        run,
+    )
+}
+
+fn tiled_grid(
+    img: &Planar,
+    (tw, th): (usize, usize),
+    pad: usize,
+    scale: usize,
+    workers: usize,
+    out: &mut Planar,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
+) -> Result<(), EngineError> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    let tile = tile.max(16);
     if (out.w, out.h) != (img.w * scale, img.h * scale) {
         *out = Planar::zeros(img.w * scale, img.h * scale);
     }
     let tiles: Vec<(usize, usize, usize, usize)> = (0..img.h)
-        .step_by(tile)
-        .flat_map(|ty| (0..img.w).step_by(tile).map(move |tx| (tx, ty)))
-        .map(|(tx, ty)| (tx, ty, tile.min(img.w - tx), tile.min(img.h - ty)))
+        .step_by(th)
+        .flat_map(|ty| (0..img.w).step_by(tw).map(move |tx| (tx, ty)))
+        .map(|(tx, ty)| (tx, ty, tw.min(img.w - tx), th.min(img.h - ty)))
         .collect();
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);

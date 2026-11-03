@@ -29,7 +29,7 @@ export function StageInspector() {
       <div className="text-[13px] font-medium">{STAGE_META[kind].label}</div>
       {COMING_SOON.has(kind) && (
         <p className="rounded-sm bg-white/4 px-2 py-1.5 text-[11px] leading-relaxed text-fg-muted ring-1 ring-border">
-          Coming soon: the engine currently runs Real-CUGAN denoising, Real-ESRGAN upscaling and RIFE interpolation.
+          Coming soon: this stage's model runtime ships in an upcoming update.
         </p>
       )}
       {kind !== "deinterlace" && kind !== "faceFix" && !COMING_SOON.has(kind) && (
@@ -67,7 +67,9 @@ export function StageInspector() {
               options={[{ value: "0", label: "Gentle" }, { value: "1", label: "Low" }, { value: "2", label: "Medium" }, { value: "3", label: "Strong" }]} />
           )}
           <span className="text-[10px] leading-snug text-fg-subtle">
-            Gentle restores without smoothing grain. Real-CUGAN is trained on anime and line art; on live action, start Gentle or Low.
+            {s.model === "nafnet-sidd"
+              ? "Trained on real camera noise. Lower levels mix back more of the original grain; Strong uses the network's full result."
+              : "Gentle restores without smoothing grain. Real-CUGAN is trained on anime and line art; on live action, NAFNet usually fits better."}
           </span>
         </Field>
       )}

@@ -159,6 +159,32 @@ async fn preview_and_thumbnail() {
     );
     assert_eq!(d.after_frames, d.before_frames);
 
+    // The newer models through the real worker: NAFNet denoise, General v3
+    // with its noise blend, RIFE 4.25 (frames padded to 64).
+    let newer = PipelineSpec {
+        stages: vec![
+            StageConfig::Denoise {
+                model: m("nafnet-sidd"),
+                strength: 2,
+            },
+            StageConfig::Upscale {
+                model: m("realesr-general-x4v3"),
+                scale: 2,
+                denoise: Some(0.3),
+            },
+            StageConfig::Interpolate {
+                model: m("rife-v4.25"),
+                factor: 2,
+                scene_threshold: 10.0,
+            },
+        ],
+    };
+    let n = preview::render(&tools, &sdr, 1.0, 0.5, &newer, &root, &|_| {})
+        .await
+        .expect("newer models preview");
+    assert_eq!((n.width, n.height), (640, 360));
+    assert_eq!(n.after_frames, n.before_frames * 2, "×2 interpolation");
+
     // A single-frame "still" (shown first while the full 2 s renders).
     let still = preview::render(&tools, &sdr, 3.0, 0.0, &up, &root, &|_| {})
         .await

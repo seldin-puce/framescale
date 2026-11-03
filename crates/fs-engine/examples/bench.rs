@@ -125,6 +125,24 @@ fn main() {
                 4,
             ),
             (
+                "NAFNet denoise       720×576",
+                StageConfig::Denoise {
+                    model: m("nafnet-sidd"),
+                    strength: 3,
+                },
+                (720, 576),
+                4,
+            ),
+            (
+                "NAFNet denoise       1920×1080",
+                StageConfig::Denoise {
+                    model: m("nafnet-sidd"),
+                    strength: 3,
+                },
+                (1920, 1080),
+                3,
+            ),
+            (
                 "Real-CUGAN SE denoise 1920×1080",
                 StageConfig::Denoise {
                     model: m("realcugan-se"),

@@ -259,6 +259,83 @@ impl Cugan {
     }
 }
 
+/// Context pixels around each NAFNet tile: its U-Net sees far.
+const NAF_PAD: usize = 32;
+/// NAFNet's sides must be multiples of 2^levels.
+const NAF_ALIGN: usize = 16;
+
+/// NAFNet (megvii; SIDD: real camera noise), a 1× restoration network. The
+/// strength mixes its output with the input. Its channel attention averages
+/// over each tile, which is close to the 256 px crops it was trained on.
+struct Naf {
+    model: UniquePtr<ffi::Model>,
+    strength: f32,
+}
+
+impl Naf {
+    fn denoise(
+        &self,
+        img: &Planar,
+        tile: u32,
+        workers: usize,
+        scratch: &mut Planar,
+    ) -> Result<Planar, EngineError> {
+        // Twice the SR tile (it still halves with the controller on OOM),
+        // split evenly: each tile's channel attention then sees a similar area.
+        let size = tile as usize * 2;
+        planar::tiled_into_even(img, size, NAF_PAD, 1, workers, scratch, |t| {
+            let p = planar::pad_to_multiple(t, NAF_ALIGN);
+            let mut o = Planar::zeros(p.w, p.h);
+            self.model
+                .run_sr(
+                    &p.data,
+                    p.w as i32,
+                    p.h as i32,
+                    &mut o.data,
+                    p.w as i32,
+                    p.h as i32,
+                )
+                .map_err(|e| map_err(&e, tile))?;
+            let mut o = if (p.w, p.h) == (t.w, t.h) {
+                o
+            } else {
+                o.region(0, 0, t.w, t.h)
+            };
+            if self.strength < 1.0 {
+                for (v, s) in o.data.iter_mut().zip(&t.data) {
+                    *v = s + self.strength * (*v - s);
+                }
+            }
+            Ok(o)
+        })?;
+        Ok(scratch.clone())
+    }
+}
+
+/// The Denoise stage's network.
+enum Denoiser {
+    Cugan(Cugan),
+    Naf(Naf),
+}
+
+impl Denoiser {
+    fn denoise(
+        &self,
+        img: &Planar,
+        tile: u32,
+        workers: usize,
+        scratch: &mut Planar,
+    ) -> Result<Planar, EngineError> {
+        match self {
+            Self::Cugan(c) => c.denoise(img, tile, workers, scratch),
+            Self::Naf(n) => n.denoise(img, tile, workers, scratch),
+        }
+    }
+}
+
+/// NAFNet strength per Denoise level (Gentle, Low, Medium, Strong).
+const NAF_STRENGTH: [f32; 4] = [0.4, 0.6, 0.8, 1.0];
+
 /// Faces narrower than this (output pixels) are left alone: restoring them
 /// would mostly invent detail.
 const MIN_FACE: f32 = 24.0;
@@ -373,7 +450,7 @@ impl FaceFix {
 }
 
 pub struct NcnnBackend {
-    denoise: Option<Cugan>,
+    denoise: Option<Denoiser>,
     face: Option<FaceFix>,
     /// Faces restored in the last processed frame.
     faces: usize,
@@ -561,15 +638,28 @@ impl NcnnBackend {
                             "custom denoise models are not supported yet".into(),
                         ));
                     }
-                    let (param, bin) = resolve_cugan(models, &model.id, *strength)?;
-                    denoise = Some(Cugan {
-                        model: load(&device, threads, &param, &bin)?,
-                        stats_area: if device.index >= 0 {
-                            CUGAN_STATS_AREA_GPU
-                        } else {
-                            CUGAN_STATS_AREA_CPU
-                        },
-                    });
+                    if model.id == "nafnet-sidd" {
+                        let dir = models.join("nafnet");
+                        denoise = Some(Denoiser::Naf(Naf {
+                            model: load(
+                                &device,
+                                threads,
+                                &dir.join("NAFNet-SIDD-width32.param"),
+                                &dir.join("NAFNet-SIDD-width32.bin"),
+                            )?,
+                            strength: NAF_STRENGTH[usize::from((*strength).min(3))],
+                        }));
+                    } else {
+                        let (param, bin) = resolve_cugan(models, &model.id, *strength)?;
+                        denoise = Some(Denoiser::Cugan(Cugan {
+                            model: load(&device, threads, &param, &bin)?,
+                            stats_area: if device.index >= 0 {
+                                CUGAN_STATS_AREA_GPU
+                            } else {
+                                CUGAN_STATS_AREA_CPU
+                            },
+                        }));
+                    }
                 }
                 StageConfig::FaceFix { model, fidelity } => {
                     if model.path.is_some() {

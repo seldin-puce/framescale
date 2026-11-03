@@ -47,6 +47,7 @@ export const STAGE_ORDER: StageKind[] = ["deinterlace", "denoise", "upscale", "f
 export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
   deinterlace: [{ id: "bwdif", label: "BWDIF (motion adaptive)" }],
   denoise: [
+    { id: "nafnet-sidd", label: "NAFNet (live action, camera noise)" },
     { id: "realcugan-se", label: "Real-CUGAN SE (4 levels)" },
     { id: "realcugan-pro", label: "Real-CUGAN Pro (finer detail)" },
   ],
@@ -239,7 +240,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   selected: null,
   stages: {
     deinterlace: defaults(false, "bwdif"),
-    denoise: defaults(false, "realcugan-se"),
+    denoise: defaults(false, "nafnet-sidd"),
     upscale: defaults(true, "realesrgan-x4plus"),
     faceFix: defaults(false, "codeformer"),
     interpolate: defaults(false, "rife-v4.25"),

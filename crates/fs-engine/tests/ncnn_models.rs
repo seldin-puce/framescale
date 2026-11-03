@@ -180,6 +180,7 @@ fn real_models_on_every_device() {
 
         // Inside the device loop: ncnn::shutdown() below ends Vulkan for good.
         check_general_v3(&dev, &models);
+        check_nafnet(&dev, &models);
         check_real_cugan(&dev, &models);
         check_face_fix(&dev, &models);
     }
@@ -298,6 +299,91 @@ fn check_general_v3(dev: &DeviceSel, models: &std::path::Path) {
         "our converter reproduces the official export"
     );
     let _ = std::fs::remove_dir_all(alt);
+}
+
+fn denoise(
+    models: &std::path::Path,
+    dev: &DeviceSel,
+    id: &str,
+    strength: u8,
+    src: &Frame,
+    tile: u32,
+) -> Frame {
+    let stage = StageConfig::Denoise {
+        model: ModelRef {
+            id: id.into(),
+            path: None,
+        },
+        strength,
+    };
+    let mut b = NcnnBackend::new(&plan(vec![stage], models), dev.clone(), 4)
+        .unwrap_or_else(|e| panic!("load {id}: {e}"));
+    b.process(src, tile).unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+/// NAFNet-SIDD, converted from megvii's checkpoint at build time. Always: it
+/// removes noise from a synthetic frame and keeps its size. With
+/// `FS_NAFNET_REF` (folder with `naf_in.rgb`, a 600×337 RGB24 noisy photo, and
+/// `naf_ref.f32`, megvii's own PyTorch output for one engine tile): the
+/// conversion reproduces the reference, and 256 px tiles stay close to one
+/// whole-frame tile (no visible seams).
+fn check_nafnet(dev: &DeviceSel, models: &std::path::Path) {
+    let clean = test_frame(64, 48, 0);
+    let grainy = noisy(&clean, 24);
+    let out = denoise(models, dev, "nafnet-sidd", 3, &grainy, 256);
+    assert_eq!((out.width, out.height), (64, 48));
+    let (before, after) = (mean_abs_diff(&grainy, &clean), mean_abs_diff(&out, &clean));
+    let gentle = mean_abs_diff(
+        &denoise(models, dev, "nafnet-sidd", 0, &grainy, 256),
+        &clean,
+    );
+    eprintln!("   nafnet: noise |Δ| {before:.2} → {after:.2} (strong), {gentle:.2} (gentle)");
+    assert!(
+        after < before * 0.6,
+        "NAFNet removes noise: {before} → {after}"
+    );
+    assert!(
+        after < gentle && gentle < before,
+        "strength orders the result"
+    );
+
+    let Some(dir) = env_path("FS_NAFNET_REF") else {
+        return eprintln!("   skip NAFNet reference check: set FS_NAFNET_REF");
+    };
+    let (w, h) = (600u32, 337u32);
+    let input = Frame::new(
+        w,
+        h,
+        FrameFormat::Rgb24,
+        std::fs::read(dir.join("naf_in.rgb")).expect("naf_in.rgb"),
+    );
+    let raw = std::fs::read(dir.join("naf_ref.f32")).expect("naf_ref.f32");
+    let plane = (w * h) as usize;
+    let reference: Vec<u8> = (0..plane * 3)
+        .map(|i| {
+            let (c, p) = (i % 3, i / 3); // interleaved RGB from planar float
+            let k = (c * plane + p) * 4;
+            let v = f32::from_le_bytes([raw[k], raw[k + 1], raw[k + 2], raw[k + 3]]);
+            (v.clamp(0.0, 1.0) * 255.0).round() as u8
+        })
+        .collect();
+    let reference = Frame::new(w, h, FrameFormat::Rgb24, reference);
+    let whole = denoise(models, dev, "nafnet-sidd", 3, &input, 1024);
+    let max = |a: &Frame, b: &Frame| {
+        a.data
+            .iter()
+            .zip(&b.data)
+            .map(|(x, y)| x.abs_diff(*y))
+            .max()
+            .unwrap_or(0)
+    };
+    let (d, m) = (mean_abs_diff(&whole, &reference), max(&whole, &reference));
+    eprintln!("   nafnet vs megvii PyTorch: mean |Δ| {d:.3}, max {m}");
+    assert!(d < 0.5 && m <= 12, "converted NAFNet matches the reference");
+    let tiled = denoise(models, dev, "nafnet-sidd", 3, &input, 256);
+    let (d, m) = (mean_abs_diff(&tiled, &whole), max(&tiled, &whole));
+    eprintln!("   nafnet 256 px tiles vs whole frame: mean |Δ| {d:.3}, max {m}");
+    assert!(d < 1.0, "tiles agree with the whole frame: {d}");
 }
 
 /// Deterministic noise (LCG), roughly ±`amp` levels.
