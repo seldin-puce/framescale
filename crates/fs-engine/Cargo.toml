@@ -30,3 +30,7 @@ workspace = true
 [[example]]
 name = "bench"
 required-features = ["ncnn"]
+
+[[example]]
+name = "enhance_image"
+required-features = ["ncnn"]
