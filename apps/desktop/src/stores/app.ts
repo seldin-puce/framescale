@@ -26,7 +26,7 @@ export interface StageState {
   model: string;
   /** BYOM file for encumbered models (Face Fix). Never bundled. */
   modelPath: string | null;
-  scale: 2 | 3 | 4;
+  scale: 2 | 4;
   strength: 0 | 1 | 2 | 3;
   fidelity: number;
   factor: 2 | 3 | 4;

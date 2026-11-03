@@ -40,8 +40,8 @@ export function StageInspector() {
       )}
       {kind === "upscale" && (
         <Field label="Scale">
-          <Segmented ariaLabel="Upscale factor" value={String(s.scale)} onChange={(v) => set({ scale: Number(v) as 2 | 3 | 4 })}
-            options={[{ value: "2", label: "2×" }, { value: "3", label: "3×" }, { value: "4", label: "4×" }]} />
+          <Segmented ariaLabel="Upscale factor" value={String(s.scale)} onChange={(v) => set({ scale: Number(v) as 2 | 4 })}
+            options={[{ value: "2", label: "2×" }, { value: "4", label: "4×" }]} />
         </Field>
       )}
       {kind === "denoise" && (
