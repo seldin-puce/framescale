@@ -154,16 +154,26 @@ bundled FFmpeg (a GPL requirement). You don't need it to run the app.
 <summary><b>Windows</b></summary>
 
 Run the `setup.exe`. It installs for your user only and needs no admin rights.
-If Windows SmartScreen says "Windows protected your PC", the installer isn't
-code-signed yet: click **More info → Run anyway**.
+If Windows SmartScreen says "Windows protected your PC", that's because the
+installer isn't code-signed yet: click **More info → Run anyway**.
 </details>
 
 <details>
 <summary><b>macOS</b></summary>
 
-Open the `.dmg` and drag **FrameScale AI** into **Applications**. Until the app
-is notarized, macOS may say it "can't be opened" or "is damaged". Either open
-**System Settings → Privacy & Security** and click **Open Anyway**, or run once:
+The easiest way: paste this into **Terminal**. It downloads the right build for
+your Mac, installs it into Applications and opens it
+([what it does](site/install.sh)):
+
+```sh
+curl -fsSL https://framescale.org/install.sh | bash
+```
+
+Or install by hand: open the `.dmg` and drag **FrameScale AI** into
+**Applications**. FrameScale isn't notarized by Apple (that needs a paid
+developer account), so the first launch says it "can't be verified" or "is
+damaged". Open **System Settings → Privacy & Security** and click
+**Open Anyway**, or run once:
 
 ```sh
 xattr -dr com.apple.quarantine "/Applications/FrameScale AI.app"

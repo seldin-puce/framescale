@@ -77,7 +77,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY (cargo tauri signer generate)",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3MzM0MTdFMUY3MDQ4NUUKUldSZVNIQWZma0V6MTY2WmJZTVg4cFRmd2ZpS0xQdWJsaHBKS1dCK0EySGc0QlNFNXhpc1NBdmIK",
       "endpoints": [
         "https://github.com/seldin-puce/framescale/releases/latest/download/latest.json"
       ],

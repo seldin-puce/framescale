@@ -26,6 +26,7 @@
   a { color: var(--accent); text-decoration: none; }
   a:hover { color: var(--accent-hover); }
   code, pre { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  p code { overflow-wrap: anywhere; }
   .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
 
   /* Nav */

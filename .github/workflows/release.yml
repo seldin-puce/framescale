@@ -151,8 +151,19 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: FrameScale AI ${{ github.ref_name }}
           releaseBody: |
-            Downloads are below. Installation and first-run notes: see the README.
-            GPL: the corresponding source of the bundled FFmpeg is attached as ffmpeg-gpl-sources.tar.
+            Free, open-source AI video upscaler and enhancer: https://framescale.org
+
+            **Downloads** are below: Windows `…_x64-setup.exe`, macOS `…_aarch64.dmg` (Apple Silicon) or `…_x64.dmg` (Intel), Linux `.AppImage`, `.deb` or `.rpm`.
+
+            **macOS:** the easiest install is one line in Terminal (no security prompt):
+            ```sh
+            curl -fsSL https://framescale.org/install.sh | bash
+            ```
+            The app isn't notarized yet, so a .dmg downloaded in the browser needs *System Settings → Privacy & Security → Open Anyway* on first launch.
+
+            **Windows:** the installer isn't code-signed yet. If SmartScreen says "Windows protected your PC", click *More info → Run anyway*.
+
+            More in the [README](https://github.com/seldin-puce/framescale#download). GPL: the corresponding source of the bundled FFmpeg is attached as `ffmpeg-gpl-sources.tar`.
           releaseDraft: true
           includeUpdaterJson: ${{ env.FS_UPDATER == 'true' }}
 
