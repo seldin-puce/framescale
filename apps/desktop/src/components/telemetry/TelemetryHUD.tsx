@@ -193,7 +193,7 @@ export function TelemetryHUD() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Tooltip label="Eco caps average GPU duty with micro-sleeps between frames. It prevents laptop overheating on long batches. Auto targets 80 °C.">
+          <Tooltip label="Eco caps average GPU duty with short pauses between frames, for cooler, quieter long renders. 50% roughly halves the GPU's work rate; Auto only slows down above 80 °C. Applies to renders, not 2-second previews.">
             <span className="flex items-center gap-1 text-[11px] text-fg-muted">
               <Leaf className={cn("size-3.5", eco.mode !== "off" ? "text-ok" : "text-fg-subtle")} /> Eco
             </span>
