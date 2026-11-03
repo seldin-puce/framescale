@@ -126,7 +126,7 @@ pub async fn probe_media(state: S<'_>, paths: Vec<String>) -> R<Vec<ProbeResult>
 #[tauri::command]
 pub fn enqueue_jobs(state: S<'_>, mut specs: Vec<JobSpec>) -> R<Vec<JobId>> {
     for spec in &specs {
-        reject_unsupported(&spec.pipeline)?;
+        validate_pipeline(&spec.pipeline)?;
     }
     // Never overwrite: not an existing file, not another job's pending output.
     let mut taken: std::collections::HashSet<String> = journal(&state, |j| j.list_jobs())?
@@ -173,48 +173,7 @@ fn unique_output(path: &str, taken: &std::collections::HashSet<String>) -> Strin
         .map_or_else(|| path.to_owned(), |c| c.to_string_lossy().into_owned())
 }
 
-/// What a CodeFormer-ncnn model folder must contain.
-const CODEFORMER_FILES: [&str; 4] = [
-    "encoder.param",
-    "encoder.bin",
-    "generator.param",
-    "generator.bin",
-];
-
-fn check_codeformer(dir: &std::path::Path) -> R<()> {
-    let missing: Vec<&str> = CODEFORMER_FILES
-        .into_iter()
-        .filter(|f| !dir.join(f).is_file())
-        .collect();
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(err(
-            "faceModel",
-            format!("{} is missing {}", dir.display(), missing.join(", ")),
-        ))
-    }
-}
-
-/// Is this a usable CodeFormer-ncnn folder? (Only fixed file names are
-/// checked for existence; nothing is read.)
-#[tauri::command]
-pub fn check_face_model(path: String) -> R<()> {
-    check_codeformer(std::path::Path::new(&path))
-}
-
-fn reject_unsupported(pipeline: &fs_types::PipelineSpec) -> R<()> {
-    for s in &pipeline.stages {
-        if let fs_types::StageConfig::FaceFix { model, .. } = s {
-            let Some(dir) = model.path.as_deref() else {
-                return Err(err(
-                    "faceModel",
-                    "Face Fix needs your CodeFormer model folder: choose it in the Face Fix stage",
-                ));
-            };
-            check_codeformer(std::path::Path::new(dir))?;
-        }
-    }
+fn validate_pipeline(pipeline: &fs_types::PipelineSpec) -> R<()> {
     pipeline
         .validate()
         .map_err(|e| err("invalidPipeline", format!("{e:?}")))
@@ -230,7 +189,7 @@ pub async fn render_preview(
     seconds: f64,
     pipeline: fs_types::PipelineSpec,
 ) -> R<fs_types::PreviewResult> {
-    reject_unsupported(&pipeline)?;
+    validate_pipeline(&pipeline)?;
     let tools = fs_core::preview::PreviewTools {
         ffmpeg: state.paths.ffmpeg.clone(),
         ffprobe: state.paths.ffprobe.clone(),

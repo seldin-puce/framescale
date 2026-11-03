@@ -36,10 +36,53 @@ own licenses apply to those components. This file ships inside the application b
 | Real-CUGAN (se, pro) | MIT | https://github.com/bilibili/ailab / nihui/realcugan-ncnn-vulkan |
 | RIFE v4.6 | MIT | https://github.com/hzwer/ECCV2022-RIFE / nihui/rife-ncnn-vulkan |
 | YuNet face detector (2023mar), ncnn conversion | MIT, © 2020 Shiqi Yu | https://github.com/opencv/opencv_zoo / huggingface.co/lightcella/face-pipeline-ncnn |
+| CodeFormer (face restoration), ncnn conversion | **S-Lab License 1.0: non-commercial use only**, © 2022 S-Lab | https://github.com/sczhou/CodeFormer (weights) / https://github.com/FeiGeChuanShu/CodeFormer-ncnn (ncnn conversion, commit `cfe0fe2`) |
 
-Models such as CodeFormer are **not** distributed with FrameScale AI. Users
-who choose to load them (Bring-Your-Own-Model) do so under those models' own
-license terms. CodeFormer's weights are under the S-Lab License 1.0
-(non-commercial use only); Face Fix loads the ncnn conversion
-(github.com/FeiGeChuanShu/CodeFormer-ncnn, `models/` folder) from a folder the
-user chooses.
+### CodeFormer is for non-commercial use only
+
+CodeFormer is the one bundled component that is not freely licensed. Its
+weights, and the ncnn conversion of them in `models/codeformer/`, may be used
+and redistributed for non-commercial purposes only. FrameScale AI is
+distributed non-commercially. The GPL covers FrameScale's own code, not these
+weights: anyone who redistributes FrameScale commercially must remove
+`models/codeformer/` or obtain a license from S-Lab. The conversion repository
+states no license of its own. The license also ships as
+`models/codeformer/LICENSE`:
+
+```text
+S-Lab License 1.0
+
+Copyright 2022 S-Lab
+
+Redistribution and use for non-commercial purpose in source and 
+binary forms, with or without modification, are permitted provided 
+that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright 
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright 
+   notice, this list of conditions and the following disclaimer in 
+   the documentation and/or other materials provided with the 
+   distribution.
+
+3. Neither the name of the copyright holder nor the names of its 
+   contributors may be used to endorse or promote products derived 
+   from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+In the event that redistribution and/or use for commercial purpose in 
+source or binary forms, with or without modification is required, 
+please contact the contributor(s) of the work.
+```

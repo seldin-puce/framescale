@@ -72,10 +72,10 @@ url     = "https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/Mol
 sha256  = "f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
 
 # ------------------------------------------------------------------------------
-# Bundled (freely licensed) models. Encumbered weights such as CodeFormer are
-# NEVER listed here: they are BYOM only, loaded from a user-chosen path.
-# `select` keeps archive entries whose path contains the marker; the output
-# path starts at the marker.
+# Bundled models. All are freely licensed except CodeFormer (non-commercial,
+# see its entry). `select` keeps archive entries whose path contains the
+# marker; the output path starts at the marker. `file` stores a single-file
+# artifact as `dest/<file>`.
 # ------------------------------------------------------------------------------
 [[models]]
 id      = "realesrgan"
@@ -94,7 +94,7 @@ select  = ["models-se/", "models-pro/"]
 dest    = "realcugan"
 
 # YuNet face detector (OpenCV Zoo, MIT), ncnn conversion. Face Fix uses it to
-# find faces and their 5 landmarks; the restoration model is the user's own.
+# find faces and their 5 landmarks; CodeFormer (below) restores them.
 [[models]]
 id      = "yunet"
 license = "MIT"
@@ -118,6 +118,53 @@ url     = "https://huggingface.co/lightcella/face-pipeline-ncnn/resolve/babe70ce
 sha256  = "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958"
 file    = "LICENSE"
 dest    = "yunet"
+
+# CodeFormer face restoration (© 2022 S-Lab, NTU), ncnn conversion by
+# FeiGeChuanShu/CodeFormer-ncnn (that repo states no license of its own).
+# S-Lab License 1.0: use and redistribution for NON-COMMERCIAL purposes only,
+# with the notice kept: its LICENSE ships in models/codeformer/. FrameScale is
+# distributed non-commercially (decision D10, docs/architecture/phase-1.md);
+# a commercial redistribution must drop models/codeformer or license it from
+# S-Lab. About 189 MB.
+[[models]]
+id      = "codeformer"
+license = "S-Lab-1.0 (non-commercial)"
+url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0fe2d247c05f7e7de00fab9ee55030315eac0/models/encoder.param"
+sha256  = "5478ad3d579ac916a27337b8deeec642f254fb812995910bbf3916c3de6cc442"
+file    = "encoder.param"
+dest    = "codeformer"
+
+[[models]]
+id      = "codeformer"
+license = "S-Lab-1.0 (non-commercial)"
+url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0fe2d247c05f7e7de00fab9ee55030315eac0/models/encoder.bin"
+sha256  = "15a5b7b73a22ab0f54f9270c88367c53e568dc3f46e532fabb0028845b7876ff"
+file    = "encoder.bin"
+dest    = "codeformer"
+
+[[models]]
+id      = "codeformer"
+license = "S-Lab-1.0 (non-commercial)"
+url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0fe2d247c05f7e7de00fab9ee55030315eac0/models/generator.param"
+sha256  = "c734a59ff6002b97f8e5efcc06965c17cc543b0957b28187f947986ec35a1d6c"
+file    = "generator.param"
+dest    = "codeformer"
+
+[[models]]
+id      = "codeformer"
+license = "S-Lab-1.0 (non-commercial)"
+url     = "https://raw.githubusercontent.com/FeiGeChuanShu/CodeFormer-ncnn/cfe0fe2d247c05f7e7de00fab9ee55030315eac0/models/generator.bin"
+sha256  = "34af3c500aa6912597867d1bd1bc2f4c98c7f9ad82fa39c045047b48989b9b3c"
+file    = "generator.bin"
+dest    = "codeformer"
+
+[[models]]
+id      = "codeformer"
+license = "S-Lab-1.0 (non-commercial)"
+url     = "https://raw.githubusercontent.com/sczhou/CodeFormer/b33cc7d639d6545bfcccc7e0bc6ae51f24e79c2b/LICENSE"
+sha256  = "cfd654022bdc44fdd809670d50239bcb1ebf2f4a661dca7e328f93c269538246"
+file    = "LICENSE"
+dest    = "codeformer"
 
 [[models]]
 id      = "rife"

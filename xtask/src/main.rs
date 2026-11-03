@@ -35,7 +35,7 @@ enum Cmd {
         #[arg(long)]
         stub: bool,
     },
-    /// Download and extract the bundled, freely-licensed models.
+    /// Download and extract the bundled models (CodeFormer's terms: THIRD_PARTY_NOTICES.md).
     Models,
     /// Fetch + verify the pinned ncnn source into `.cache/ncnn/src` (used by fs-engine's build.rs).
     Ncnn,

@@ -24,8 +24,6 @@ import { supportNudge } from "@/lib/support";
 export interface StageState {
   enabled: boolean;
   model: string;
-  /** BYOM file for encumbered models (Face Fix). Never bundled. */
-  modelPath: string | null;
   scale: 2 | 4;
   strength: 0 | 1 | 2 | 3;
   fidelity: number;
@@ -51,14 +49,13 @@ export const MODELS: Record<StageKind, { id: string; label: string }[]> = {
     { id: "realesrgan-x4plus-anime", label: "Real-ESRGAN x4+ Anime" },
     { id: "realesr-animevideov3", label: "Real-ESR AnimeVideo v3 (fast)" },
   ],
-  faceFix: [{ id: "codeformer", label: "CodeFormer (your ncnn copy)" }],
+  faceFix: [{ id: "codeformer", label: "CodeFormer" }],
   interpolate: [{ id: "rife-v4.6", label: "RIFE v4.6" }],
 };
 
 const defaults = (enabled: boolean, model: string): StageState => ({
   enabled,
   model,
-  modelPath: null,
   scale: 2,
   strength: 1,
   fidelity: 0.7,
@@ -72,7 +69,7 @@ export function toStageConfigs(stages: Record<StageKind, StageState>): StageConf
   for (const kind of STAGE_ORDER) {
     const s = stages[kind];
     if (!s.enabled) continue;
-    const model = { id: s.model, path: s.modelPath };
+    const model = { id: s.model, path: null };
     switch (kind) {
       case "deinterlace":
         out.push({ kind, sendField: s.sendField });

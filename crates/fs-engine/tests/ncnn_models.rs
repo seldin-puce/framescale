@@ -168,7 +168,7 @@ fn real_models_on_every_device() {
         check_face_fix(&dev, &models);
     }
 
-    // Face Fix without the user's model folder fails with a clear message.
+    // Face Fix runs the bundled CodeFormer only: other folders are rejected.
     let dev = DeviceSel {
         index: -1,
         name: "CPU".into(),
@@ -177,7 +177,10 @@ fn real_models_on_every_device() {
     let err = NcnnBackend::new(
         &plan(
             vec![StageConfig::FaceFix {
-                model: m("codeformer"),
+                model: ModelRef {
+                    id: "codeformer".into(),
+                    path: Some("/elsewhere/codeformer".into()),
+                },
                 fidelity: 0.5,
             }],
             &models,
@@ -185,8 +188,8 @@ fn real_models_on_every_device() {
         dev,
         1,
     )
-    .expect_err("face fix needs a model folder");
-    assert!(err.to_string().contains("CodeFormer model folder"), "{err}");
+    .expect_err("custom face model");
+    assert!(err.to_string().contains("not supported"), "{err}");
     ncnn::shutdown();
 }
 
@@ -378,32 +381,42 @@ fn region_diff(a: &Frame, b: &Frame, (x0, y0, x1, y1): (u32, u32, u32, u32)) -> 
     s / ((x1 - x0) * (y1 - y0) * 3) as f32
 }
 
-/// Face Fix with the user's own CodeFormer-ncnn (`FS_CODEFORMER` = folder) on
-/// a real photo (`FS_FACE_IMAGE`; one frontal face around x 150–330, y 40–230
-/// in the 600×337 test still): the face is restored, colours are kept, the
-/// background stays bit-identical and the fidelity setting matters.
+/// Face Fix with the bundled CodeFormer. Always: it loads, and a frame with
+/// no faces passes through bit-identical. With a real photo (`FS_FACE_IMAGE`;
+/// one frontal face around x 150–330, y 40–230 in the 600×337 test still):
+/// the face is restored, colours are kept, the background stays
+/// bit-identical and the fidelity setting matters.
 fn check_face_fix(dev: &DeviceSel, models: &std::path::Path) {
-    let (Some(cf), Some(img_path)) = (env_path("FS_CODEFORMER"), env_path("FS_FACE_IMAGE")) else {
-        return eprintln!("   skip Face Fix: set FS_CODEFORMER and FS_FACE_IMAGE");
+    let stage = |fidelity: f32| StageConfig::FaceFix {
+        model: ModelRef {
+            id: "codeformer".into(),
+            path: None,
+        },
+        fidelity,
+    };
+    let run = |src: &Frame, fidelity: f32| {
+        let mut b = NcnnBackend::new(&plan(vec![stage(fidelity)], models), dev.clone(), 4)
+            .expect("load face fix");
+        let t = std::time::Instant::now();
+        let out = b.process(src, 256).expect("face fix");
+        (out, b.last_faces(), t.elapsed())
+    };
+    let plain = test_frame(64, 48, 0);
+    let (out, faces, _) = run(&plain, 0.5);
+    assert_eq!(faces, 0, "no face in a gradient");
+    assert_eq!(
+        (out.width, out.height, &out.data),
+        (plain.width, plain.height, &plain.data),
+        "frames without faces pass through"
+    );
+
+    let Some(img_path) = env_path("FS_FACE_IMAGE") else {
+        return eprintln!("   skip Face Fix on a photo: set FS_FACE_IMAGE");
     };
     let Some(src) = load_image(&img_path) else {
         return eprintln!("   skip Face Fix: can't decode the image (FS_FFMPEG/FS_FFPROBE)");
     };
-    let stage = |fidelity: f32| StageConfig::FaceFix {
-        model: ModelRef {
-            id: "codeformer".into(),
-            path: Some(cf.to_string_lossy().into()),
-        },
-        fidelity,
-    };
-    let run = |fidelity: f32| {
-        let mut b = NcnnBackend::new(&plan(vec![stage(fidelity)], models), dev.clone(), 4)
-            .expect("load face fix");
-        let t = std::time::Instant::now();
-        let out = b.process(&src, 256).expect("face fix");
-        (out, b.last_faces(), t.elapsed())
-    };
-    let (out, faces, took) = run(0.5);
+    let (out, faces, took) = run(&src, 0.5);
     let face = (170, 60, 310, 220);
     let d_face = region_diff(&out, &src, face);
     let corner = (src.width - 60, 0, src.width, 40);
@@ -428,8 +441,8 @@ fn check_face_fix(dev: &DeviceSel, models: &std::path::Path) {
         );
     }
     assert_eq!(region_diff(&out, &src, corner), 0.0, "background untouched");
-    let (sharp, _, _) = run(0.0);
-    let (faithful, _, _) = run(1.0);
+    let (sharp, _, _) = run(&src, 0.0);
+    let (faithful, _, _) = run(&src, 1.0);
     let d_fid = region_diff(&sharp, &faithful, face);
     eprintln!("   fidelity 0 vs 1: face Δ {d_fid:.2}");
     assert!(d_fid > 0.5, "fidelity must change the result: {d_fid}");

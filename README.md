@@ -56,10 +56,11 @@ FrameScale AI is free software, licensed under the
 [GNU General Public License v3.0 or later](LICENSE). You may use, study, share
 and modify it; distributed modifications must stay under the GPL.
 
-Bundled components keep their own licenses (FFmpeg LGPL, ncnn BSD-3-Clause,
+Bundled components keep their own licenses (FFmpeg GPL, ncnn BSD-3-Clause,
 Real-ESRGAN BSD-3-Clause, RIFE MIT, …). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Models with non-commercial terms (e.g. CodeFormer) are never bundled. They're
-bring-your-own only.
+One exception: Face Fix bundles **CodeFormer**, whose weights are licensed for
+**non-commercial use only** (S-Lab License 1.0). The GPL doesn't extend to
+them.
 
 ## Supporting the project
 

@@ -2,8 +2,8 @@
 //! ncnn's CPU path when no usable GPU exists.
 //!
 //! Supported stages: Denoise (Real-CUGAN), Upscale (Real-ESRGAN family), Face
-//! Fix (YuNet detection + the user's own CodeFormer-ncnn) and Interpolate
-//! (RIFE v4.6). Anything else is rejected up front, never silently skipped.
+//! Fix (YuNet detection + CodeFormer restoration) and Interpolate (RIFE
+//! v4.6). Anything else is rejected up front, never silently skipped.
 #![allow(unsafe_code)] // cxx bridge
 
 use std::path::{Path, PathBuf};
@@ -249,7 +249,8 @@ const MAX_FACES: usize = 12;
 const FACE_SCORE: f32 = 0.7;
 
 /// Face Fix: YuNet finds faces and landmarks; each face is aligned to the
-/// FFHQ template, restored by CodeFormer and feathered back in.
+/// FFHQ template, restored by CodeFormer and feathered back in. Both models
+/// are bundled (`models/yunet`, `models/codeformer`).
 struct FaceFix {
     detector: UniquePtr<ffi::Model>,
     encoder: UniquePtr<ffi::Model>,
@@ -259,12 +260,12 @@ struct FaceFix {
 impl FaceFix {
     fn load(
         models: &Path,
-        dir: &Path,
         fidelity: f32,
         device: &DeviceSel,
         threads: i32,
     ) -> Result<Self, EngineError> {
         let yunet = models.join("yunet");
+        let dir = models.join("codeformer");
         let detector = load(
             device,
             threads,
@@ -502,18 +503,18 @@ impl NcnnBackend {
                     });
                 }
                 StageConfig::FaceFix { model, fidelity } => {
-                    let Some(dir) = model.path.as_deref() else {
-                        return Err(EngineError::ModelNotFound(
-                            "Face Fix needs your CodeFormer model folder".into(),
+                    if model.path.is_some() {
+                        return Err(EngineError::Unsupported(
+                            "custom face models are not supported yet".into(),
                         ));
-                    };
-                    face_fix = Some(FaceFix::load(
-                        models,
-                        Path::new(dir),
-                        *fidelity,
-                        &device,
-                        threads,
-                    )?);
+                    }
+                    if model.id != "codeformer" {
+                        return Err(EngineError::ModelNotFound(format!(
+                            "unknown face model '{}'",
+                            model.id
+                        )));
+                    }
+                    face_fix = Some(FaceFix::load(models, *fidelity, &device, threads)?);
                 }
                 StageConfig::Upscale { model, scale } => {
                     if model.path.is_some() {

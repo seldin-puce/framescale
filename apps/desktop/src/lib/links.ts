@@ -10,8 +10,8 @@ export const LINKS = {
   sponsors: "",
   /** Ko-fi page, e.g. "https://ko-fi.com/<you>". */
   kofi: "https://ko-fi.com/A4P429YUDG",
-  /** Where users get CodeFormer for ncnn (non-commercial license; not bundled). */
-  codeformer: "https://github.com/FeiGeChuanShu/CodeFormer-ncnn",
+  /** CodeFormer upstream: bundled for Face Fix under the S-Lab License 1.0 (non-commercial). */
+  codeformer: "https://github.com/sczhou/CodeFormer",
 } as const;
 
 export const hasDonationLinks = Boolean(LINKS.sponsors || LINKS.kofi);

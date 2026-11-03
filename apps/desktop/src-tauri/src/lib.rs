@@ -90,7 +90,6 @@ pub fn run() {
             commands::open_source,
             commands::compare_open,
             commands::compare_close,
-            commands::check_face_model,
             commands::subscribe_jobs,
             commands::subscribe_telemetry,
         ])

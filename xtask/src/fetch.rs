@@ -34,11 +34,24 @@ pub fn fetch(a: &Artifact) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Cache file for `a`: the URL's last segment, prefixed with a hash of the URL
+/// so that same-named artifacts (`LICENSE`, `encoder.bin`) never collide.
+fn cache_path(a: &Artifact) -> PathBuf {
+    let key: String = Sha256::digest(a.effective_url().as_bytes())[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    util::cache_dir()
+        .join("downloads")
+        .join(format!("{key}-{}", a.file_name()))
+}
+
 /// Download without verification (used by `pin` only).
 pub fn download(a: &Artifact) -> Result<PathBuf> {
-    let dir = util::cache_dir().join("downloads");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(a.file_name());
+    let path = cache_path(a);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     if path.exists() {
         return Ok(path);
     }

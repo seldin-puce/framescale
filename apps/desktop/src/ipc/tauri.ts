@@ -78,7 +78,6 @@ export const tauriBackend: Backend = {
   openSource: (id) => invoke("open_source", { id }),
   compareOpen: (id, maxWidth) => invoke("compare_open", { id, maxWidth: Math.round(maxWidth) }),
   compareClose: (session) => invoke("compare_close", { session }),
-  checkFaceModel: (path) => invoke("check_face_model", { path }),
   async pickFolder() {
     const r = await open({ directory: true, multiple: false });
     return typeof r === "string" ? r : null;

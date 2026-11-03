@@ -78,11 +78,12 @@ than the 9070 XT, which the default ranking correctly avoids.
   realcugan-ncnn-vulkan) and every tile gets those means injected. Tiled output
   matches one whole-frame tile (GPU max Δ 1/255). The ncnn Pro models use plain
   0–1 RGB (measured; the PyTorch `(x-0.15)/0.7` is already folded in).
-- **Face Fix** (done, bring-your-own CodeFormer): YuNet (bundled, MIT) finds
-  faces and 5 landmarks on a 640² letterbox; each face is aligned to the FFHQ
-  512 template (least-squares similarity), restored by the user's
-  CodeFormer-ncnn (encoder, CPU top-1 codebook lookup, generator) and pasted
-  back with a 10 % feathered border. Runs after Upscale on the final pixels.
+- **Face Fix** (done; both models bundled, CodeFormer is non-commercial, D10):
+  YuNet (MIT) finds faces and 5 landmarks on a 640² letterbox; each face is
+  aligned to the FFHQ 512 template (least-squares similarity), restored by
+  CodeFormer (FeiGeChuanShu's ncnn conversion in `models/codeformer`: encoder,
+  CPU top-1 codebook lookup, generator) and pasted back with a 10 % feathered
+  border. Runs after Upscale on the final pixels.
   The conversion bakes CodeFormer's fidelity `w` into four fuse `Eltwise`
   coefficients (`1, 0.7`); the generator param is rewritten in memory, so the
   fidelity slider is real. Measured: about 240 ms per face on RX 9070 XT,
