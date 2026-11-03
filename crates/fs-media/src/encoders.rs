@@ -120,13 +120,16 @@ fn hw_candidates(codec: VideoCodec, os: Os, vendor: Option<Vendor>) -> Vec<&'sta
     apis.into_iter().filter_map(by_api).collect()
 }
 
-fn sw_candidate(codec: VideoCodec, color: &ColorProfile) -> Option<&'static str> {
+/// Software encoders in preference order. x265/x264 come from FFmpeg's GPL
+/// configuration; kvazaar/openh264 remain as fallbacks for builds without them.
+fn sw_candidates(codec: VideoCodec, color: &ColorProfile) -> Vec<&'static str> {
     match codec {
-        VideoCodec::Av1 => Some("libsvtav1"),
-        // kvazaar (BSD) is 8-bit only: acceptable for SDR 8-bit sources.
-        VideoCodec::Hevc10 if !color.needs_high_precision() => Some("libkvazaar"),
-        VideoCodec::H264 if !color.is_hdr() => Some("libopenh264"),
-        _ => None,
+        VideoCodec::Av1 => vec!["libsvtav1"],
+        // x265: Main10 incl. HDR10 metadata. kvazaar is 8-bit, so SDR 8-bit sources only.
+        VideoCodec::Hevc10 if color.needs_high_precision() => vec!["libx265"],
+        VideoCodec::Hevc10 => vec!["libx265", "libkvazaar"],
+        VideoCodec::H264 if !color.is_hdr() => vec!["libx264", "libopenh264"],
+        _ => vec![],
     }
 }
 
@@ -141,7 +144,13 @@ pub fn all_candidates(os: Os, vendor: Option<Vendor>) -> Vec<&'static str> {
     ] {
         v.extend(hw_candidates(c, os, vendor));
     }
-    v.extend(["libsvtav1", "libkvazaar", "libopenh264"]);
+    v.extend([
+        "libsvtav1",
+        "libx265",
+        "libx264",
+        "libkvazaar",
+        "libopenh264",
+    ]);
     v
 }
 
@@ -193,9 +202,9 @@ pub fn select(
         });
     }
     let hw = hw_candidates(codec, env.os, env.vendor);
-    let sw = sw_candidate(codec, color);
+    let sw = sw_candidates(codec, color);
     let first_hw = hw.iter().copied().find(|e| env.usable.contains(*e));
-    let sw_ok = sw.filter(|e| env.usable.contains(*e));
+    let sw_ok = sw.iter().copied().find(|e| env.usable.contains(*e));
     let (encoder, fell_back) = match pref {
         EncoderPreference::Hardware => (first_hw, false),
         EncoderPreference::Software => (sw_ok, false),
@@ -205,13 +214,13 @@ pub fn select(
         },
     };
     let Some(encoder) = encoder else {
-        let reason = match (codec, sw) {
-            (VideoCodec::ProRes422Hq | VideoCodec::ProRes4444, _) => {
+        let reason = match codec {
+            VideoCodec::ProRes422Hq | VideoCodec::ProRes4444 => {
                 "ProRes is only available on macOS (VideoToolbox)".to_owned()
             }
-            (VideoCodec::Hevc10, None) => {
-                "no hardware HEVC encoder is usable, and the only software HEVC encoder \
-                 (kvazaar) is 8-bit SDR only. Choose AV1 (SVT-AV1) instead"
+            VideoCodec::Hevc10 if !env.usable.contains("libx265") => {
+                "no hardware HEVC encoder is usable and this FFmpeg build has no x265 \
+                 (kvazaar covers 8-bit SDR only). Choose AV1 (SVT-AV1) instead"
                     .to_owned()
             }
             _ => format!("no usable encoder among {hw:?} / {sw:?}"),
@@ -349,6 +358,64 @@ fn build(
             ]);
             pix_fmt = "yuv420p10le".into();
         }
+        "libx265" => {
+            // x265 writes HDR10 static metadata as SEI in the bitstream. It uses
+            // the same units we store: chromaticity ×50 000, luminance ×10 000.
+            let mut params = vec!["log-level=error".to_owned()];
+            if color.is_hdr() {
+                let (p, t, m) = (
+                    color.primaries.ffmpeg_name().unwrap_or("bt2020"),
+                    color.transfer.ffmpeg_name().unwrap_or("smpte2084"),
+                    color.matrix.ffmpeg_name().unwrap_or("bt2020nc"),
+                );
+                params.push(format!("colorprim={p}:transfer={t}:colormatrix={m}"));
+                params.push("hdr10-opt=1:repeat-headers=1".into());
+                if let Some(md) = color.mastering {
+                    params.push(format!(
+                        "master-display=G({},{})B({},{})R({},{})WP({},{})L({},{})",
+                        md.green[0],
+                        md.green[1],
+                        md.blue[0],
+                        md.blue[1],
+                        md.red[0],
+                        md.red[1],
+                        md.white[0],
+                        md.white[1],
+                        md.max_luminance,
+                        md.min_luminance
+                    ));
+                }
+                if let Some(cll) = color.content_light {
+                    params.push(format!("max-cll={},{}", cll.max_cll, cll.max_fall));
+                }
+                hdr = HdrEmbedding::Bitstream;
+            }
+            args = s(&[
+                "-preset",
+                "medium",
+                "-crf",
+                &qs,
+                "-profile:v",
+                "main10",
+                "-g",
+                &gop,
+            ]);
+            args.extend(s(&["-x265-params", &params.join(":")]));
+            pix_fmt = "yuv420p10le".into();
+        }
+        "libx264" => {
+            args = s(&[
+                "-preset",
+                "medium",
+                "-crf",
+                &qs,
+                "-profile:v",
+                "high",
+                "-g",
+                &gop,
+            ]);
+            pix_fmt = "yuv420p".into();
+        }
         "libkvazaar" => {
             args = s(&["-kvazaar-params", &format!("preset=medium,qp={q}")]);
             pix_fmt = "yuv420p".into();
@@ -483,6 +550,80 @@ mod tests {
             + 1];
         assert!(p.contains("mastering-display=G(0.2650,0.6900)B(0.1500,0.0600)R(0.6800,0.3200)WP(0.3127,0.3290)L(1000.0000,0.0050)"), "{p}");
         assert!(p.contains("content-light=1000,400"));
+    }
+
+    #[test]
+    fn fedora_amd_hevc_uses_x265_with_hdr10_in_bitstream() {
+        // RX 9070 XT on Fedora: Mesa VAAPI has AV1 but no H.264/HEVC.
+        let usable = [
+            "av1_vaapi",
+            "libsvtav1",
+            "libx265",
+            "libx264",
+            "libkvazaar",
+            "libopenh264",
+        ];
+        let e = env(Os::Linux, Some(Vendor::Amd), &usable);
+        let s = select(
+            VideoCodec::Hevc10,
+            EncoderPreference::Auto,
+            &color(true),
+            T,
+            &e,
+        )
+        .expect("x265");
+        assert_eq!(s.encoder, "libx265");
+        assert!(s.fell_back, "hardware was preferred but unavailable");
+        assert_eq!(
+            (s.pix_fmt.as_str(), s.out_bit_depth, s.hdr),
+            ("yuv420p10le", 10, HdrEmbedding::Bitstream)
+        );
+        let p = &s.args[s
+            .args
+            .iter()
+            .position(|a| a == "-x265-params")
+            .expect("params")
+            + 1];
+        assert!(
+            p.contains("master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50)"),
+            "{p}"
+        );
+        assert!(
+            p.contains("max-cll=1000,400") && p.contains("transfer=smpte2084"),
+            "{p}"
+        );
+        // SDR 8-bit sources also get x265 (10-bit) ahead of kvazaar.
+        let sdr = select(
+            VideoCodec::Hevc10,
+            EncoderPreference::Auto,
+            &color(false),
+            T,
+            &e,
+        )
+        .expect("sdr");
+        assert_eq!(
+            (sdr.encoder.as_str(), sdr.hdr),
+            ("libx265", HdrEmbedding::NotApplicable)
+        );
+        // H.264 prefers x264 over openh264; AV1 still goes to the GPU.
+        let h = select(
+            VideoCodec::H264,
+            EncoderPreference::Software,
+            &color(false),
+            T,
+            &e,
+        )
+        .expect("h264");
+        assert_eq!(h.encoder, "libx264");
+        let a = select(
+            VideoCodec::Av1,
+            EncoderPreference::Auto,
+            &color(true),
+            T,
+            &e,
+        )
+        .expect("av1");
+        assert_eq!(a.encoder, "av1_vaapi");
     }
 
     #[test]

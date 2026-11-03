@@ -42,6 +42,22 @@ apps/desktop/src-tauri/binaries/
 
 `--stub` writes empty placeholders. `tauri-build` only checks that sidecars exist, so lint and test CI jobs don't need real binaries.
 
+## GPL source obligations (before publishing binaries)
+
+FrameScale is GPL-3.0-or-later and bundles **GPL FFmpeg** (with x264/x265).
+Pushing the source repository needs nothing extra. Every **binary release**
+(installers, DMGs, AppImages) must give recipients the *corresponding source*
+of everything GPL inside it:
+
+- FrameScale itself: the tagged commit on GitHub (link it in the release notes).
+- FFmpeg + its GPL dependencies at the pinned versions: attach a source archive
+  to the GitHub release. For Windows/Linux that's the FFmpeg source at
+  `n8.1.3-32-g760d10603e` plus BtbN/FFmpeg-Builds at tag
+  `autobuild-2026-11-02-12-51` (its scripts pin every dependency). For macOS
+  it's the tarballs listed under `[ffmpeg.source]` in `third_party/manifest.toml`.
+- Attaching the archives beats a written offer: it's simpler and lasts as long
+  as the release does.
+
 ## Third-party pinning
 
 `third_party/manifest.toml` is the only source of external artifacts.

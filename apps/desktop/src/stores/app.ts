@@ -97,18 +97,22 @@ export function toStageConfigs(stages: Record<StageKind, StageState>): StageConf
 
 /** Encoders per codec family, hardware first (mirrors fs-media::encoders). */
 export const CODEC_ENCODERS: Record<"hevc10" | "av1" | "h264", string[]> = {
-  hevc10: ["hevc_nvenc", "hevc_amf", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "libkvazaar"],
+  hevc10: ["hevc_nvenc", "hevc_amf", "hevc_qsv", "hevc_vaapi", "hevc_videotoolbox", "libx265", "libkvazaar"],
   av1: ["av1_nvenc", "av1_amf", "av1_qsv", "av1_vaapi", "libsvtav1"],
-  h264: ["h264_nvenc", "h264_amf", "h264_qsv", "h264_vaapi", "h264_videotoolbox", "libopenh264"],
+  h264: ["h264_nvenc", "h264_amf", "h264_qsv", "h264_vaapi", "h264_videotoolbox", "libx264", "libopenh264"],
 };
 
 export const hasHardware = (codec: keyof typeof CODEC_ENCODERS, usable: string[]) =>
   CODEC_ENCODERS[codec].some((e) => !e.startsWith("lib") && usable.includes(e));
 
-/** Best default: hardware HEVC, else hardware AV1, else SVT-AV1 (always present). */
+/**
+ * Best default: a hardware encoder if there is one (HEVC first, for player
+ * compatibility), else x265 HEVC (plays everywhere), else SVT-AV1.
+ */
 export function preferredCodec(usable: string[]): VideoCodec {
   if (hasHardware("hevc10", usable)) return "hevc10";
   if (hasHardware("av1", usable)) return "av1";
+  if (usable.includes("libx265")) return "hevc10";
   return "av1";
 }
 

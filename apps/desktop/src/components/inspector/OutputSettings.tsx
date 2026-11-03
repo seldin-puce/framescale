@@ -36,7 +36,13 @@ export function OutputSettings() {
           {CODECS.map((c) => (
             <option key={c.value} value={c.value} disabled={!available(c)}>
               {c.label}
-              {hw(c) ? " · GPU" : c.value === "hevc10" && available(c) ? " · CPU, 8-bit SDR only" : available(c) ? " · CPU" : " · unavailable"}
+              {hw(c)
+                ? " · GPU"
+                : c.value === "hevc10" && available(c) && !encoders.includes("libx265")
+                  ? " · CPU, 8-bit SDR only"
+                  : available(c)
+                    ? " · CPU"
+                    : " · unavailable"}
             </option>
           ))}
         </select>

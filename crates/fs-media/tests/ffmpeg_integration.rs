@@ -269,3 +269,125 @@ fn hdr10_passthrough_through_rgb48_and_svtav1() {
     assert_eq!(color::output_tags(&o.video.color)[1], "bt2020");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn hdr10_static_metadata_survives_x265_bitstream() {
+    use fs_media::encoders::{self, EncodeTarget, EncoderEnv, Os};
+    use fs_types::media::{ContentLightLevel, MasteringDisplay};
+    use fs_types::pipeline::{EncoderPreference, VideoCodec};
+
+    let Some((ff, fp)) = tools() else {
+        return eprintln!("skip: FS_FFMPEG/FS_FFPROBE unset");
+    };
+    let dir = tmpdir("x265");
+    let src = dir.join("hdr.mkv");
+    ffmpeg(
+        &ff,
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:r=25:d=0.4",
+            "-vf",
+            "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=tv",
+            "-c:v",
+            "libsvtav1",
+            "-preset",
+            "12",
+            src.to_str().expect("utf8"),
+        ],
+    );
+    let info = probe_info(&fp, &src);
+    let mut color = info.video.color.clone();
+    let md = MasteringDisplay {
+        red: [34000, 16000],
+        green: [13250, 34500],
+        blue: [7500, 3000],
+        white: [15635, 16450],
+        max_luminance: 10_000_000,
+        min_luminance: 50,
+    };
+    let cll = ContentLightLevel {
+        max_cll: 1000,
+        max_fall: 400,
+    };
+    color.mastering = Some(md);
+    color.content_light = Some(cll);
+
+    // The real selection path, as a render on Fedora + AMD would take it.
+    let env = EncoderEnv {
+        os: Os::Linux,
+        vendor: None,
+        usable: ["libx265".to_owned()].into(),
+        vaapi_device: None,
+    };
+    let rate = Rational::new(25, 1);
+    let target = EncodeTarget {
+        quality: 28,
+        width: 320,
+        height: 180,
+        rate,
+    };
+    let sel = encoders::select(
+        VideoCodec::Hevc10,
+        EncoderPreference::Auto,
+        &color,
+        target,
+        &env,
+    )
+    .expect("select");
+    assert_eq!(sel.encoder, "libx265");
+
+    let frames = decode_all(&ff, &decode_plan(&info, rate, FrameFormat::Rgb48), 0);
+    let enc = EncodePlan {
+        encoder: sel.encoder,
+        args: sel.args,
+        pix_fmt: sel.pix_fmt,
+        vaapi_device: None,
+        width: 320,
+        height: 180,
+        rate,
+        color: fs_types::media::ColorProfile {
+            bit_depth: 10,
+            ..color
+        },
+        hdr: sel.hdr,
+    };
+    let out = dir.join("seg.mkv");
+    let a = argv::encode_segment(&enc, 320, 180, FrameFormat::Rgb48, &out);
+    let mut child = Command::new(&ff)
+        .args(a.as_slice())
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("enc");
+    {
+        let mut stdin = child.stdin.take().expect("stdin");
+        for f in &frames {
+            stdin.write_all(f).expect("write");
+        }
+    }
+    let o = child.wait_with_output().expect("wait");
+    assert!(
+        o.status.success(),
+        "{a}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+
+    // probe() reads the first frame's SEI side data for PQ sources.
+    let got = probe_info(&fp, &out);
+    assert_eq!(got.video.codec, "hevc");
+    assert_eq!(got.video.profile.as_deref(), Some("Main 10"));
+    assert_eq!(got.video.color.transfer, TransferCharacteristic::Pq);
+    assert_eq!(
+        got.video.color.mastering,
+        Some(md),
+        "ST 2086 must be in the bitstream"
+    );
+    assert_eq!(
+        got.video.color.content_light,
+        Some(cll),
+        "CLL must be in the bitstream"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -80,7 +80,9 @@ than the 9070 XT, which the default ranking correctly avoids.
   long-term fix.
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
-- HDR10 *static* metadata on hardware encoders is tags-only (warned in the UI);
+- HDR10 *static* metadata: embedded in the bitstream by **x265** (HEVC) and
+  SVT-AV1 (AV1), verified by a round-trip test. Hardware encoders stay
+  tags-only (warned in the UI);
   SVT-AV1 embeds it in the bitstream.
 - macOS: battery state and GPU temperature (IOKit) not yet wired; Linux/Windows are.
 - One unexplained `fs-core` job-test failure (worker exited "usage" with no

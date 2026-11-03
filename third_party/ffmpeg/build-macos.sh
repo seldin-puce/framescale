@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Build a static, LGPL-only FFmpeg (+ ffprobe) for one macOS architecture.
+# Build a static GPL FFmpeg (+ ffprobe) for one macOS architecture.
 #
 #   build-macos.sh <aarch64-apple-darwin|x86_64-apple-darwin> <src-dir> <out-dir>
 #
 # <src-dir> holds pre-verified tarballs written by `cargo xtask sidecars`:
-#   ffmpeg.tar.xz  svt_av1.tar.gz  dav1d.tar.gz  zimg.tar.gz
+#   ffmpeg.tar.xz  svt_av1.tar.gz  dav1d.tar.gz  zimg.tar.gz  x265.tar.gz
 # This script never downloads anything.
 #
 # Requires: Xcode CLT, cmake, meson, ninja, nasm, autoconf/automake/libtool, pkg-config.
-# Linked libraries are BSD/ISC/WTFPL only, so the result stays LGPL
-# (xtask gate enforces this).
+# GPL build (FrameScale is GPL-3.0-or-later): x265 is GPL-2.0+, the other
+# libraries are BSD/ISC/WTFPL. The xtask gate rejects --enable-nonfree.
 set -euo pipefail
 
 TRIPLE="$1"; SRC="$(cd "$2" && pwd)"; OUT="$3"
@@ -70,7 +70,15 @@ unpack zimg zimg.tar.gz
     $([[ $CROSS == 1 ]] && echo "--host=$([[ $ARCH == arm64 ]] && echo aarch64 || echo x86_64)-apple-darwin") && \
   make -j "$JOBS" && make install )
 
-# --- FFmpeg (LGPL) ------------------------------------------------------------
+# --- x265 (GPL-2.0+), 10-bit: HEVC Main10 with HDR10 SEI -----------------------
+unpack x265 x265.tar.gz
+cmake -S "$WORK/x265/source" -B "$WORK/x265/build" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DCMAKE_OSX_ARCHITECTURES="$ARCH" -DENABLE_SHARED=OFF -DENABLE_CLI=OFF \
+  -DHIGH_BIT_DEPTH=ON -DENABLE_HDR10_PLUS=OFF -DENABLE_ASSEMBLY=ON  # NEON / NASM
+cmake --build "$WORK/x265/build" -j "$JOBS" && cmake --install "$WORK/x265/build"
+
+# --- FFmpeg (GPL) -------------------------------------------------------------
 unpack ffmpeg ffmpeg.tar.xz
 CROSS_ARGS=()
 [[ $CROSS == 1 ]] && CROSS_ARGS=(--enable-cross-compile --arch="$ARCH" --target-os=darwin)
@@ -82,12 +90,9 @@ CROSS_ARGS=()
     --enable-static --disable-shared --disable-doc --disable-ffplay --disable-debug \
     --disable-autodetect \
     --enable-videotoolbox --enable-audiotoolbox --enable-coreimage \
+    --enable-gpl --enable-libx265 \
     --enable-libsvtav1 --enable-libdav1d --enable-libzimg \
     --enable-zlib --enable-bzlib \
   && make -j "$JOBS" && make install )
 
-# Safety net (xtask runs the full gate as well).
-if grep -q -- '--enable-gpl' <(strings "$OUT/bin/ffmpeg" | grep -m1 -- '--prefix'); then
-  echo "GPL build detected — refusing" >&2; exit 1
-fi
 echo "FFmpeg for $TRIPLE → $OUT/bin"

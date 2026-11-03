@@ -12,7 +12,9 @@ own licenses apply to those components. This file ships inside the application b
 
 | Component | Version | License | Notes |
 |---|---|---|---|
-| FFmpeg (`ffmpeg`, `ffprobe`) | 8.1.3 | LGPL-2.1-or-later (LGPLv3 where `--enable-version3`) | Unmodified upstream source: https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz. Build configuration is printed by `ffmpeg -buildconf`. Windows/Linux builds: BtbN/FFmpeg-Builds (LGPL variant). macOS: `third_party/ffmpeg/build-macos.sh`. |
+| FFmpeg (`ffmpeg`, `ffprobe`) | 8.1.3 | GPL-3.0-or-later (built with `--enable-gpl --enable-version3`) | Unmodified upstream source: https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz. Build configuration is printed by `ffmpeg -buildconf`. Windows/Linux builds: BtbN/FFmpeg-Builds (GPL variant, `autobuild-2026-11-02-12-51`). macOS: `third_party/ffmpeg/build-macos.sh`. Corresponding source is attached to each release. |
+| x265 (inside FFmpeg) | 4.2 (macOS); BtbN's pinned build elsewhere | GPL-2.0-or-later | https://download.videolan.org/videolan/x265/ |
+| x264 (inside FFmpeg, Windows/Linux) | BtbN's pinned build | GPL-2.0-or-later | https://code.videolan.org/videolan/x264 |
 | SVT-AV1 (inside FFmpeg) | 4.3.0 | BSD-3-Clause-Clear + AOM Patent License 1.0 | |
 | dav1d (inside FFmpeg) | 1.5.4 | BSD-2-Clause | |
 | zimg (inside FFmpeg) | 3.0.6 | WTFPL | |
