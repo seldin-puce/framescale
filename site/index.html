@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FrameScale AI — free AI video upscaling on your own GPU</title>
+<meta name="description" content="Free, open-source desktop app for AI video upscaling, denoising, face restoration and frame interpolation. Runs locally on NVIDIA, AMD, Intel and Apple GPUs.">
+<link rel="canonical" href="https://framescale.org/">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://framescale.org/">
+<meta property="og:title" content="FrameScale AI">
+<meta property="og:description" content="AI video upscaling, denoising, face restoration and frame interpolation — free, open source, on your own GPU.">
+<meta property="og:image" content="https://framescale.org/icon.png">
+<meta name="theme-color" content="#0b0f19">
+<style>
+  :root {
+    --bg: #0b0f19;
+    --surface: #111827;
+    --raised: #172033;
+    --border: rgb(255 255 255 / 0.08);
+    --border-strong: rgb(255 255 255 / 0.14);
+    --fg: #e6e9f0;
+    --muted: #9aa3b5;
+    --subtle: #6b7489;
+    --accent: #4c8dff;
+    --accent-hover: #6aa1ff;
+    --ok: #3ecf8e;
+    --warn: #f5b041;
+    --radius: 14px;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); }
+  code, pre { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+
+  /* Nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgb(11 15 25 / 0.8);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 650; letter-spacing: -0.01em; }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  .nav nav { display: flex; gap: 22px; margin-left: auto; font-size: 14px; }
+  .nav nav a { color: var(--muted); }
+  .nav nav a:hover { color: var(--fg); }
+  @media (max-width: 720px) { .nav nav a.opt { display: none; } }
+
+  /* Hero */
+  .hero { position: relative; padding: 96px 0 72px; text-align: center; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% -20% auto; height: 620px; z-index: -1;
+    background: radial-gradient(closest-side, rgb(76 141 255 / 0.22), transparent 70%);
+  }
+  .hero img.logo { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 20px 60px rgb(76 141 255 / 0.25); }
+  .hero h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1.08; letter-spacing: -0.03em; margin: 28px auto 18px; max-width: 14ch; }
+  .hero h1 span { background: linear-gradient(90deg, #8fb6ff, var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p.lead { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); max-width: 640px; margin: 0 auto 34px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 22px;
+    border-radius: 11px; font-weight: 600; font-size: 15px; border: 1px solid transparent;
+    transition: background .15s, border-color .15s, transform .15s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-hover); color: #fff; }
+  .btn.ghost { border-color: var(--border-strong); color: var(--fg); background: rgb(255 255 255 / 0.03); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--fg); }
+  .btn svg { width: 18px; height: 18px; }
+  .meta { margin-top: 18px; font-size: 13px; color: var(--subtle); }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 40px; }
+  .pill { font-size: 13px; color: var(--muted); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+
+  /* Sections */
+  section { padding: 72px 0; border-top: 1px solid var(--border); }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  h2 { font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; line-height: 1.15; margin: 10px 0 14px; }
+  .sub { color: var(--muted); max-width: 680px; margin: 0 0 40px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; transition: border-color .15s;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card h3 { margin: 12px 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card .ico {
+    width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+    background: rgb(76 141 255 / 0.12); color: var(--accent); border: 1px solid rgb(76 141 255 / 0.3);
+  }
+  .card .ico svg { width: 20px; height: 20px; }
+  .tag { display: inline-block; font-size: 12px; color: var(--muted); margin-top: 12px; font-family: ui-monospace, Menlo, monospace; }
+
+  /* Pipeline */
+  .pipeline { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; }
+  .step { flex: 1 1 170px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; position: relative; }
+  .step .n { font-size: 12px; color: var(--subtle); font-family: ui-monospace, Menlo, monospace; }
+  .step h3 { margin: 4px 0 6px; font-size: 16px; }
+  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* Table */
+  .table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .table th, .table td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 15px; }
+  .table th { color: var(--subtle); font-weight: 600; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; background: var(--raised); }
+  .table tr:last-child td { border-bottom: 0; }
+  .table td.num { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .note { font-size: 13px; color: var(--subtle); margin-top: 12px; }
+  .table-wrap { overflow-x: auto; }
+
+  /* Downloads */
+  .dl { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .dl .card { display: flex; flex-direction: column; gap: 6px; }
+  .dl h3 { margin: 6px 0 2px; }
+  .dl .files { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .dl .files a {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--fg); font-size: 14px;
+  }
+  .dl .files a:hover { border-color: var(--accent); }
+  .dl .files small { color: var(--subtle); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  pre.term {
+    background: #070a12; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; overflow-x: auto; color: #cdd6e6; font-size: 14px; line-height: 1.7; margin: 0;
+  }
+  pre.term .c { color: var(--subtle); }
+  .two { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+
+  .callout { border: 1px solid rgb(245 176 65 / 0.35); background: rgb(245 176 65 / 0.07); border-radius: var(--radius); padding: 16px 18px; font-size: 14px; color: var(--muted); }
+  .callout b { color: var(--warn); }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0 48px; color: var(--subtle); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: center; }
+  footer nav { display: flex; gap: 20px; margin-left: auto; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.svg" alt="">FrameScale AI</a>
+    <nav>
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#models">Models</a>
+      <a class="opt" href="#performance">Performance</a>
+      <a href="#download">Download</a>
+      <a href="__REPO__">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <img class="logo" src="icon.svg" alt="FrameScale AI icon">
+      <h1>Restore your video with <span>AI</span>, on your own GPU</h1>
+      <p class="lead">Upscale, denoise, fix faces and smooth motion. FrameScale AI is a free, open-source desktop app that runs entirely on your computer: no accounts, no uploads, no watermarks.</p>
+      <div class="cta">
+        <a class="btn primary" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
+          Download
+        </a>
+        <a class="btn ghost" href="__REPO__">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          Source on GitHub
+        </a>
+      </div>
+      <p class="meta">Windows · macOS · Linux &nbsp;—&nbsp; NVIDIA · AMD · Intel · Apple Silicon &nbsp;—&nbsp; GPL-3.0</p>
+      <div class="pills">
+        <span class="pill">Real-ESRGAN</span><span class="pill">NAFNet</span><span class="pill">Real-CUGAN</span>
+        <span class="pill">CodeFormer</span><span class="pill">RIFE 4.25</span><span class="pill">HDR10 · HLG</span><span class="pill">AV1 · HEVC 10-bit</span>
+      </div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="eyebrow">Features</div>
+      <h2>A complete restoration pipeline</h2>
+      <p class="sub">Turn on the stages you need. They always run in the right order, on the GPU, with a live 2-second preview of the real result before you commit to a render.</p>
+      <div class="pipeline">
+        <div class="step"><div class="n">01</div><h3>Deinterlace</h3><p>Motion-adaptive BWDIF for old TV and camcorder footage.</p></div>
+        <div class="step"><div class="n">02</div><h3>Denoise</h3><p>NAFNet for camera noise, Real-CUGAN for anime. Four strengths.</p></div>
+        <div class="step"><div class="n">03</div><h3>Upscale</h3><p>×2 or ×4 with Real-ESRGAN, with a noise-removal slider.</p></div>
+        <div class="step"><div class="n">04</div><h3>Face Fix</h3><p>Detects faces and restores them with CodeFormer.</p></div>
+        <div class="step"><div class="n">05</div><h3>Interpolate</h3><p>×2–×4 frame rate with RIFE, aware of scene cuts.</p></div>
+      </div>
+
+      <div class="grid" style="margin-top:16px">
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 4v16"/></svg></div>
+          <h3>See it before you render</h3>
+          <p>Scrub your clip, render 2 seconds of the exact pipeline with live progress, and compare split or side by side.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+          <h3>Never lose a render</h3>
+          <p>Jobs are written in 4-second segments and journaled. Pause, quit or crash, and the render resumes where it stopped.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+          <h3>Keeps everything else</h3>
+          <p>HDR10 and HLG, aspect ratio, audio (copied bit-exact), subtitles, chapters and metadata all carry over.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 6v6c0 5 3.8 9.3 9 10 5.2-.7 9-5 9-10V6l-9-4Z"/></svg></div>
+          <h3>Private by design</h3>
+          <p>Your videos never leave your computer. No accounts, no cloud processing, no analytics.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16M4 15l4-4 4 4 8-8"/></svg></div>
+          <h3>Modern output</h3>
+          <p>HEVC 10-bit, AV1 10-bit or H.264 (ProRes on macOS), with NVENC, AMF, Quick Sync, VAAPI or VideoToolbox when available.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5"/></svg></div>
+          <h3>Eco mode</h3>
+          <p>Hold a GPU temperature target or a fixed duty cycle, so long renders stay quiet and cool.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="models">
+    <div class="wrap">
+      <div class="eyebrow">Models</div>
+      <h2>Proven open models, bundled and verified</h2>
+      <p class="sub">Every model ships with the app and is pinned by SHA-256. Models without an official ncnn export are converted from the authors' own weights at build time, and checked against their reference output.</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Stage</th><th>Model</th><th>License</th></tr></thead>
+          <tbody>
+            <tr><td>Denoise</td><td>NAFNet SIDD (camera noise) · Real-CUGAN SE / Pro (anime)</td><td>MIT</td></tr>
+            <tr><td>Upscale</td><td>Real-ESRGAN x4plus, x4plus-anime, AnimeVideo-v3, General v3</td><td>BSD-3-Clause</td></tr>
+            <tr><td>Face Fix</td><td>YuNet detector · CodeFormer</td><td>MIT · S-Lab (non-commercial)</td></tr>
+            <tr><td>Interpolate</td><td>RIFE 4.25, 4.26, 4.22 lite, 4.6</td><td>MIT</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="performance">
+    <div class="wrap">
+      <div class="eyebrow">Performance</div>
+      <h2>Fast where it matters</h2>
+      <p class="sub">A native Vulkan engine (ncnn) with GPU-side custom layers, tuned tiling and two in-flight tiles per GPU.</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Workload</th><th>Speed</th></tr></thead>
+          <tbody>
+            <tr><td>Real-ESRGAN General v3 ×4, 960×540 → 4K</td><td class="num">13.5 fps</td></tr>
+            <tr><td>Real-ESR AnimeVideo-v3 ×2, 1080p → 4K</td><td class="num">10.9 fps</td></tr>
+            <tr><td>NAFNet denoise, 720×576 / 1080p</td><td class="num">26.8 / 7.1 fps</td></tr>
+            <tr><td>RIFE 4.25 interpolation, 1080p</td><td class="num">14.1 fps</td></tr>
+            <tr><td>CodeFormer face restoration</td><td class="num">≈0.2 s / face</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">AMD Radeon RX 9070 XT, Linux, Mesa 26.2. Inference only, excluding decode and encode.</p>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="eyebrow">Download</div>
+      <h2>Get FrameScale AI</h2>
+      <p class="sub">Free for everyone, every feature. Pick your system; installers come from the latest GitHub release.</p>
+      <div class="dl">
+        <div class="card">
+          <h3>Windows</h3>
+          <p>Windows 10 and 11, 64-bit. Installs per user, no admin rights.</p>
+          <div class="files">
+            <a href="__REPO__/releases/latest">Installer <small>…_x64-setup.exe</small></a>
+          </div>
+        </div>
+        <div class="card">
+          <h3>macOS</h3>
+          <p>macOS 12 or later. Drag to Applications.</p>
+          <div class="files">
+            <a href="__REPO__/releases/latest">Apple Silicon <small>…_aarch64.dmg</small></a>
+            <a href="__REPO__/releases/latest">Intel <small>…_x64.dmg</small></a>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Linux</h3>
+          <p>64-bit, with a Vulkan driver (Mesa or NVIDIA).</p>
+          <div class="files">
+            <a href="__REPO__/releases/latest">AppImage <small>any distro</small></a>
+            <a href="__REPO__/releases/latest">.deb <small>Debian / Ubuntu</small></a>
+            <a href="__REPO__/releases/latest">.rpm <small>Fedora / openSUSE</small></a>
+          </div>
+        </div>
+      </div>
+
+      <div class="two" style="margin-top:28px">
+        <div class="callout">
+          <b>First run.</b> Early builds may not be code-signed yet. On Windows, if SmartScreen appears, choose <i>More info → Run anyway</i>. On macOS, use <i>System Settings → Privacy &amp; Security → Open Anyway</i>. Details are in the <a href="__REPO__#download">README</a>.
+        </div>
+        <div>
+          <pre class="term"><span class="c"># or build it yourself</span>
+git clone __REPO__.git
+cd framescale
+pnpm install
+cargo xtask setup
+pnpm build</pre>
+          <p class="note">Full build instructions for every system are in the <a href="__REPO__#build-from-source">README</a>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="open-source">
+    <div class="wrap two">
+      <div>
+        <div class="eyebrow">Open source</div>
+        <h2>Free software, built in the open</h2>
+        <p class="sub" style="margin-bottom:20px">FrameScale AI is licensed under the GPL-3.0-or-later. Read the code, report bugs, suggest features or send a pull request.</p>
+        <div class="cta" style="justify-content:flex-start">
+          <a class="btn ghost" href="__REPO__">View on GitHub</a>
+          <a class="btn ghost" href="__REPO__/issues">Report an issue</a>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Support the project</h3>
+        <p>FrameScale stays fully featured for everyone. If it saves you time, a coffee helps pay for GPU test hardware and new models.</p>
+        <div class="cta" style="justify-content:flex-start;margin-top:16px">
+          <a class="btn primary" href="https://ko-fi.com/A4P429YUDG">☕ Buy me a coffee</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 FrameScale AI contributors · GPL-3.0-or-later</span>
+    <nav>
+      <a href="__REPO__">GitHub</a>
+      <a href="__REPO__/releases">Releases</a>
+      <a href="__REPO__/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

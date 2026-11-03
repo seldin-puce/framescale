@@ -12,6 +12,7 @@ on your own GPU.**
 ![GPUs](https://img.shields.io/badge/GPU-NVIDIA%20%7C%20AMD%20%7C%20Intel%20%7C%20Apple-success)
 ![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-orange)
 ![Status](https://img.shields.io/badge/status-pre--release-yellow)
+[![Website](https://img.shields.io/badge/website-framescale.org-4c8dff)](https://framescale.org)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/A4P429YUDG)
 
 [Features](#features) ·
