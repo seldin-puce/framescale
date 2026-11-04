@@ -1,4 +1,5 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { StopConfirm } from "./StopConfirm";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { FolderOpen, Sparkles, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -120,6 +121,7 @@ export function QueueSidebar() {
           {ready > 1 ? `Render ${ready} videos` : "Render"}
         </button>
       </div>
+      <StopConfirm />
     </aside>
   );
 }

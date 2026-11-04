@@ -1,7 +1,7 @@
 import type { JobProgress, JobSummary, MediaInfo } from "@framescale/ipc-types";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CircleCheck, CircleX, Film, FolderOpen, GripVertical, LoaderCircle, Pause, Play, RotateCcw, Square, Trash2, TriangleAlert } from "lucide-react";
+import { CircleCheck, CircleX, Film, FolderOpen, GripVertical, LoaderCircle, MemoryStick, Pause, Play, RotateCcw, Square, Trash2, TriangleAlert } from "lucide-react";
 import { useThumbnail } from "@/hooks/useThumbnail";
 import { cn } from "@/lib/cn";
 import { basename, duration } from "@/lib/format";
@@ -73,6 +73,12 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
   const done = progress?.framesDone ?? job.framesDone;
   const ratio = total > 0 ? Math.min(1, done / total) : 0;
   const s = job.state;
+  const requestStop = useApp((st) => st.requestStop);
+  const stopping = useApp((st) => st.stopping[job.id] != null);
+  // Queued or under way: these can be paused or stopped.
+  const live = !["done", "failed", "cancelled", "interrupted"].includes(s);
+  // A soft pause keeps the worker and its GPU memory; offer to free it.
+  const holdsGpu = s === "paused" && (job.error ?? "").includes("GPU memory");
   const running = s === "rendering" || s === "analyzing" || s === "concatenating" || s === "muxing";
 
   const StatusIcon = s === "done" ? CircleCheck : s === "failed" ? CircleX : s === "interrupted" ? TriangleAlert : running ? LoaderCircle : null;
@@ -103,8 +109,8 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
         <div className="mt-1 flex items-center gap-1.5">
           {StatusIcon && <StatusIcon className={cn("size-3 shrink-0", running && "animate-spin text-accent", s === "done" && "text-ok", s === "failed" && "text-err", s === "interrupted" && "text-warn")} />}
           <span className={cn("text-[10px]", s === "failed" ? "text-err" : "text-fg-muted")} title={job.error ?? undefined}>
-            {STATE_LABEL[s]}
-            {s === "rendering" && progress?.etaS != null ? ` · ${duration(progress.etaS)} left` : ""}
+            {stopping ? "Stopping…" : STATE_LABEL[s]}
+            {!stopping && s === "rendering" && progress?.etaS != null ? ` · ${duration(progress.etaS)} left` : ""}
           </span>
           {s === "done" && (
             <span className="min-w-0 truncate font-mono text-[10px] text-fg-subtle">→ {basename(job.spec.output.path)}</span>
@@ -126,14 +132,20 @@ export function JobRow({ job, progress, sortable }: { job: JobSummary; progress:
           <IconButton icon={FolderOpen} label="Show in folder" size="sm" onClick={() => void useApp.getState().revealOutput(job.id)} />
         </div>
       )}
-      <div className="flex opacity-0 group-hover:opacity-100 focus-within:opacity-100" onClick={(e) => e.stopPropagation()}>
-        {s === "rendering" && <IconButton icon={Pause} label="Pause (keeps GPU memory)" size="sm" onClick={() => void act(job.id, "pause")} />}
-        {s === "rendering" && <IconButton icon={Square} label="Pause & free GPU (finishes current segment)" size="sm" onClick={() => void act(job.id, "hardPause")} />}
-        {(s === "paused") && <IconButton icon={Play} label="Resume" size="sm" onClick={() => void act(job.id, "resume")} />}
-        {(s === "interrupted" || s === "failed") && <IconButton icon={RotateCcw} label="Resume from last segment" size="sm" onClick={() => void act(job.id, "resume")} />}
-        {!["done", "failed", "cancelled", "interrupted"].includes(s) && <IconButton icon={CircleX} label="Cancel" size="sm" onClick={() => void act(job.id, "cancel")} />}
-        {["done", "failed", "cancelled", "interrupted"].includes(s) && <IconButton icon={Trash2} label="Remove from list" size="sm" onClick={() => void act(job.id, "remove")} />}
-      </div>
+      {live ? (
+        // The job in progress: its controls stay visible, not behind hover.
+        <div className="flex" onClick={(e) => e.stopPropagation()}>
+          {s === "rendering" && <IconButton icon={Pause} label="Pause (resume later where it left off)" size="sm" onClick={() => void act(job.id, "pause")} />}
+          {s === "paused" && <IconButton icon={Play} label="Resume" size="sm" onClick={() => void act(job.id, "resume")} />}
+          {holdsGpu && <IconButton icon={MemoryStick} label="Free GPU memory (finishes the current segment, then stays paused)" size="sm" onClick={() => void act(job.id, "hardPause")} />}
+          {!stopping && <IconButton icon={Square} label="Stop: discard this render and put the clip back in Ready to render" size="sm" onClick={() => requestStop(job.id)} />}
+        </div>
+      ) : (
+        <div className="flex opacity-0 group-hover:opacity-100 focus-within:opacity-100" onClick={(e) => e.stopPropagation()}>
+          {(s === "interrupted" || s === "failed") && <IconButton icon={RotateCcw} label="Resume from last segment" size="sm" onClick={() => void act(job.id, "resume")} />}
+          <IconButton icon={Trash2} label="Remove from list" size="sm" onClick={() => void act(job.id, "remove")} />
+        </div>
+      )}
     </li>
   );
 }

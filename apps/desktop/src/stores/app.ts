@@ -254,6 +254,17 @@ interface AppStore {
   clearAutoplay(): void;
   setDevice(uuid: string | null): Promise<void>;
   jobAction(id: JobId, action: "pause" | "hardPause" | "resume" | "cancel" | "remove"): Promise<void>;
+  /** Stop a job now and put its clip back in "Ready to render". Asks first
+   *  when more than a minute of rendering would be thrown away. */
+  requestStop(id: JobId): void;
+  /** The job a stop is waiting to be confirmed for. */
+  confirmStop: JobId | null;
+  setConfirmStop(id: JobId | null): void;
+  stopJob(id: JobId): Promise<void>;
+  /** Jobs being stopped → their input, to return to the drafts once cancelled. */
+  stopping: Record<JobId, string>;
+  /** When each job's first progress report arrived (ms), for the stop prompt. */
+  renderStartedAt: Record<JobId, number>;
   handleEvent(e: JobEvent): void;
   fail(e: unknown): void;
 }
@@ -263,6 +274,9 @@ export const useApp = create<AppStore>()((set, get) => ({
   drafts: [],
   jobs: {},
   progress: {},
+  confirmStop: null,
+  stopping: {},
+  renderStartedAt: {},
   warnings: {},
   selected: null,
   stages: {
@@ -504,6 +518,30 @@ export const useApp = create<AppStore>()((set, get) => ({
     set({ hardware: await backend.hardwareInfo() });
   },
 
+  requestStop(id) {
+    const started = get().renderStartedAt[id];
+    if (started != null && Date.now() - started > STOP_CONFIRM_AFTER_MS) set({ confirmStop: id });
+    else void get().stopJob(id);
+  },
+
+  setConfirmStop: (id) => set({ confirmStop: id }),
+
+  async stopJob(id) {
+    const job = get().jobs[id];
+    if (!job) return;
+    set((s) => ({ confirmStop: null, stopping: { ...s.stopping, [id]: job.spec.input } }));
+    try {
+      // Immediate: the worker drops the segment in progress (no checkpoint).
+      await backend.cancelJob(id);
+    } catch (e) {
+      set((s) => {
+        const { [id]: _, ...stopping } = s.stopping;
+        return { stopping };
+      });
+      get().fail(e);
+    }
+  },
+
   async jobAction(id, action) {
     try {
       if (action === "pause") await backend.pauseJob(id, "soft");
@@ -529,6 +567,7 @@ export const useApp = create<AppStore>()((set, get) => ({
         case "progress":
           return {
             progress: { ...s.progress, [e.job]: e },
+            renderStartedAt: s.renderStartedAt[e.job] != null ? s.renderStartedAt : { ...s.renderStartedAt, [e.job]: Date.now() },
             jobs: job ? { ...s.jobs, [e.job]: { ...job, framesDone: e.framesDone, framesTotal: e.framesTotal } } : s.jobs,
           };
         case "stateChanged":
@@ -548,9 +587,44 @@ export const useApp = create<AppStore>()((set, get) => ({
           return { toast: { kind: "error", message: e.message } };
       }
     });
+    // A stopped job leaves the list and its clip goes back to "Ready to render",
+    // so the user can change the pipeline and render it again.
+    if (e.type === "stateChanged" && e.state === "cancelled") {
+      const input = get().stopping[e.job];
+      if (input != null) void returnToDrafts(e.job, input);
+    }
   },
 
   fail(e) {
     set({ toast: { kind: "error", message: isCmdError(e) ? e.message : String(e) } });
   },
 }));
+
+/** Rendering this long (ms) before a stop asks for confirmation. */
+const STOP_CONFIRM_AFTER_MS = 60_000;
+
+async function returnToDrafts(id: JobId, input: string) {
+  const { getState, setState } = useApp;
+  // The queue releases a job just before it reports it cancelled; retry
+  // briefly in case removal races that.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await backend.removeJob(id);
+      break;
+    } catch (e) {
+      if (attempt >= 5 || !(isCmdError(e) && e.code === "running")) {
+        getState().fail(e);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  setState((s) => {
+    const { [id]: _j, ...jobs } = s.jobs;
+    const { [id]: _p, ...progress } = s.progress;
+    const { [id]: _s, ...stopping } = s.stopping;
+    const { [id]: _r, ...renderStartedAt } = s.renderStartedAt;
+    return { jobs, progress, stopping, renderStartedAt, selected: s.selected === id ? null : s.selected };
+  });
+  await getState().addFiles([input]);
+}
