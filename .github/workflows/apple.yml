@@ -46,19 +46,10 @@ jobs:
       - name: Models (ncnn, and the .pth checkpoints)
         run: cargo xtask models
 
-      - name: Convert General v3 ×2 to Core ML
-        run: |
-          # coremltools ships its native parts for released Pythons only
-          # (the runner's default python3 can be newer): pin 3.12.
-          brew install python@3.12
-          "$(brew --prefix python@3.12)/bin/python3.12" -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q torch coremltools numpy
-          mkdir -p apps/desktop/src-tauri/resources/models/coreml
-          "$RUNNER_TEMP/venv/bin/python" scripts/convert_coreml.py \
-            --general .cache/downloads/*-realesr-general-x4v3.pth \
-            --wdn .cache/downloads/*-realesr-general-wdn-x4v3.pth \
-            --scale 2 --tile 256 --pad 10 \
-            --out apps/desktop/src-tauri/resources/models/coreml/realesr-general-x4v3-dn0.50-x2-t256-p10.mlpackage
+      - name: Core ML models (General v3 ×2, ×4)
+        env:
+          VENV: ${{ runner.temp }}/venv
+        run: scripts/coreml-models.sh
 
       - name: Test frames
         run: |

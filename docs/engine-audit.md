@@ -683,3 +683,16 @@ a real Mac, using the installed app's MoltenVK for ncnn when there is one.
   On the same GPU Core ML is 1.4× faster than ncnn through MoltenVK. With
   the Neural Engine it's 2.8× faster. "All units" picks the Neural Engine by
   itself, and the output is within FP16 rounding of ncnn's.
+
+### In the app (v0.1.2)
+
+- The Apple Silicon release builds `fs-worker` with `backend-apple`
+  (`cargo xtask sidecars` adds the feature for `aarch64-apple-darwin`).
+- `scripts/coreml-models.sh` converts General v3 ×2 and ×4 (2.4 MB each)
+  into `resources/models/coreml` in the release and test-build workflows. It
+  pins torch 2.15.0, coremltools 9.0, numpy 2.5.4 and Python 3.12.
+- Selection puts Apple first. A job it has no model for (any other network,
+  another denoise strength, interpolation) goes to ncnn without a UI warning.
+- The compiled `.mlmodelc` is kept in `<app cache>/coreml-<version>/`, so
+  only the first render or preview after an install pays the compile.
+- The Intel Mac build is unchanged (ncnn through MoltenVK).

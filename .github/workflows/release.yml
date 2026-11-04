@@ -65,6 +65,12 @@ jobs:
       - name: Sidecars + models (verified, gated)
         run: cargo xtask setup --target ${{ matrix.target }}
 
+      # Apple Silicon: Core ML models for the Neural Engine (General v3 ×2/×4),
+      # converted from the pinned checkpoints `xtask setup` fetched.
+      - name: Core ML models
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: scripts/coreml-models.sh
+
       # Signing is optional: without certificates the release still builds,
       # unsigned (macOS ad-hoc). Only the secrets that exist are exported, since
       # the bundler treats an empty APPLE_CERTIFICATE as "sign with this".

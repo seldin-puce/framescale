@@ -283,13 +283,42 @@ impl std::fmt::Debug for CoreMlEngine {
 impl CoreMlEngine {
     /// Compile and load `package` (`.mlpackage` or `.mlmodelc`) whose input
     /// is `[1, 3, side, side]` FP16 and output `[1, 3, side·scale, side·scale]`.
-    pub fn load(package: &Path, side: usize, scale: usize) -> Result<Self, EngineError> {
-        let url = NSURL::fileURLWithPath(&NSString::from_str(&package.to_string_lossy()));
+    ///
+    /// Compiling takes seconds, so with `cache` (the app's cache folder) the
+    /// compiled `.mlmodelc` is kept there per app version and reused by every
+    /// later render and preview.
+    pub fn load(
+        package: &Path,
+        side: usize,
+        scale: usize,
+        cache: Option<&Path>,
+    ) -> Result<Self, EngineError> {
+        let url_of = |p: &Path| NSURL::fileURLWithPath(&NSString::from_str(&p.to_string_lossy()));
+        let cached = cache.zip(package.file_stem()).map(|(dir, stem)| {
+            dir.join(format!("coreml-{}", env!("CARGO_PKG_VERSION")))
+                .join(stem)
+                .with_extension("mlmodelc")
+        });
         let compiled = if package.extension().is_some_and(|e| e == "mlmodelc") {
-            url
+            url_of(package)
+        } else if let Some(c) = cached.as_ref().filter(|c| c.is_dir()) {
+            url_of(c)
         } else {
-            compile(&url)
-                .map_err(|e| err(&format!("compiling {}", package.display()), Some(&*e)))?
+            let tmp = compile(&url_of(package))
+                .map_err(|e| err(&format!("compiling {}", package.display()), Some(&*e)))?;
+            // Keep it for next time; if that fails (a concurrent worker got
+            // there first, another volume), use the temporary copy.
+            match (cached, tmp.path()) {
+                (Some(c), Some(t)) => {
+                    let t = PathBuf::from(t.to_string());
+                    let kept = c
+                        .parent()
+                        .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+                        && std::fs::rename(&t, &c).is_ok();
+                    if kept { url_of(&c) } else { tmp }
+                }
+                _ => tmp,
+            }
         };
         // SAFETY: plain Objective-C object creation and setters.
         let config = unsafe { MLModelConfiguration::new() };
@@ -558,7 +587,15 @@ impl AppleBackend {
             EngineError::Unsupported(format!("no Core ML model for General v3 ×{scale}"))
         })?;
         Ok(Self {
-            engine: CoreMlEngine::load(&path, tile + 2 * pad, usize::from(scale))?,
+            engine: CoreMlEngine::load(
+                &path,
+                tile + 2 * pad,
+                usize::from(scale),
+                // The app cache folder (where the tuned tile sizes live too).
+                plan.tile_cache
+                    .as_deref()
+                    .and_then(|f| Path::new(f).parent()),
+            )?,
             scale: usize::from(scale),
             tile,
             pad,

@@ -66,7 +66,14 @@ fn build_one(m: &Manifest, triple: &str) -> Result<()> {
     }
 
     // 2. fs-worker (our own binary)
-    util::cargo(&["build", "--release", "-p", "fs-worker", "--target", triple])?;
+    let mut args = vec!["build", "--release", "-p", "fs-worker", "--target", triple];
+    // Apple Silicon: Core ML (Neural Engine) for the networks that have a
+    // converted model in resources/models/coreml (scripts/coreml-models.sh);
+    // everything else, and a build without those models, still uses ncnn.
+    if triple == "aarch64-apple-darwin" {
+        args.extend(["--features", "backend-apple"]);
+    }
+    util::cargo(&args)?;
     let built = util::root()
         .join("target")
         .join(triple)

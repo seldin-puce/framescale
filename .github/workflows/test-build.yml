@@ -68,6 +68,12 @@ jobs:
       - name: Sidecars + models (verified, gated)
         run: cargo xtask setup --target ${{ matrix.target }}
 
+      # Apple Silicon: Core ML models for the Neural Engine (General v3 ×2/×4),
+      # converted from the pinned checkpoints `xtask setup` fetched.
+      - name: Core ML models
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: scripts/coreml-models.sh
+
       - name: Build installer (unsigned)
         shell: bash
         working-directory: apps/desktop

@@ -5,7 +5,7 @@ import { backend } from "@/ipc";
 import { LINKS, hasDonationLinks } from "@/lib/links";
 import { useApp } from "@/stores/app";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 /** External link as a button: opened in the system browser via the opener plugin. */
 function LinkButton({ href, icon: Icon, children, color }: { href: string; icon: typeof Heart; children: React.ReactNode; color: string }) {

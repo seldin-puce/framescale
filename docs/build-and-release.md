@@ -72,6 +72,8 @@ of everything GPL inside it:
 
 `.github/workflows/release.yml` builds Linux (on Ubuntu 22.04, for the glibc baseline), Windows, and macOS arm64 + x86_64, and creates a **draft** GitHub release with every installer. Review it, then publish.
 
+The macOS arm64 job also runs `scripts/coreml-models.sh` (Python 3.12, torch, coremltools) to convert the Core ML models the Apple backend uses; `cargo xtask sidecars` builds that target's worker with `backend-apple`.
+
 ```sh
 git tag -a vX.Y.Z -m "FrameScale AI X.Y.Z" && git push origin vX.Y.Z
 ```

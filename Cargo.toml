@@ -15,7 +15,7 @@ members = ["apps/desktop/src-tauri", "crates/*", "xtask"]
 default-members = ["apps/desktop/src-tauri", "crates/*"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"

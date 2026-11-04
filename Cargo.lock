@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "framescale"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fs-core",
  "fs-hw",
@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "fs-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fs-hw",
  "fs-journal",
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "fs-engine"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "block2",
  "cmake",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "fs-hw"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ash",
  "fs-types",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "fs-journal"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fs-types",
  "rusqlite",
@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "fs-media"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fs-types",
  "serde",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "fs-proc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "nix",
  "serde",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "fs-types"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "fs-worker"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "crossbeam-channel",
  "fs-engine",
@@ -6140,7 +6140,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
