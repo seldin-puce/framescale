@@ -22,6 +22,7 @@ const demoEngine: EngineStats = {
   tile: 256,
   maxInFlight: 2,
   vramUsed: null,
+  vramBudget: null,
   gpuLoadPct: null,
   reusedTilesPct: 12,
 };

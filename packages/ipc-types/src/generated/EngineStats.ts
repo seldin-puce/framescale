@@ -19,6 +19,11 @@ maxInFlight: number | null,
  */
 vramUsed: number | null, 
 /**
+ * How much device memory the engine should stay under (Metal's
+ * `recommendedMaxWorkingSetSize` on Apple Silicon).
+ */
+vramBudget: number | null, 
+/**
  * GPU load as the engine sees it, where it can tell.
  */
 gpuLoadPct: number | null, 
