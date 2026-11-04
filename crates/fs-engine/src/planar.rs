@@ -3,6 +3,7 @@
 
 use fs_types::worker::FrameFormat;
 
+use crate::engine::{NetEngine, SideInputs, Tensor, ThreadedEngine, Ticket};
 use crate::{EngineError, Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,7 +260,8 @@ pub fn tiled_into_even_reusing(
     Ok((memory.reused - before) as usize)
 }
 
-fn even_grid(img: &Planar, tile: usize) -> (usize, usize) {
+/// The grid [`tiled_into_even`] uses: equal tiles of at most `tile` px a side.
+pub fn even_grid(img: &Planar, tile: usize) -> (usize, usize) {
     let tile = tile.max(16);
     let even = |n: usize| n.div_ceil(n.div_ceil(tile)).max(1);
     (even(img.w), even(img.h))
@@ -299,25 +301,46 @@ pub fn tiled_into_even(
     )
 }
 
-/// A finished tile: its output, and the input to remember for reuse.
-enum Done {
-    Ran(usize, Planar, Option<Planar>),
-    Reused,
-}
-
+/// The scoped-thread form every closure-based tiling call goes through:
+/// `workers` threads run `run`, [`run_tiled`] schedules and stitches.
 #[allow(clippy::too_many_arguments)]
 fn tiled_grid(
     img: &Planar,
-    (tw, th): (usize, usize),
+    grid: (usize, usize),
     pad: usize,
     scale: usize,
     workers: usize,
     out: &mut Planar,
-    mut memory: Option<&mut TileMemory>,
+    memory: Option<&mut TileMemory>,
     run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<(), EngineError> {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let f = |t: &Planar, _: Option<&SideInputs>| run(t);
+    std::thread::scope(|s| {
+        let mut engine = ThreadedEngine::scoped(s, workers, &f);
+        run_tiled(&mut engine, img, grid, pad, scale, out, memory, None)
+        // `engine` drops here, before the scope joins its threads.
+    })
+}
 
+/// Run a scale-`scale` network over `img` on `engine`, tile by tile on a
+/// `(tw, th)` grid with `pad` px of context around each tile, keeping up to
+/// `engine.max_in_flight()` tiles submitted and stitching each tile's
+/// interior into `out` as it finishes (in any order). With `memory`, tiles
+/// whose padded input is unchanged since the last call keep their output
+/// (see [`TileMemory`]). `side` goes with every tile. The first error stops
+/// further submissions; tiles already running finish and are discarded.
+#[allow(clippy::too_many_arguments)]
+pub fn run_tiled(
+    engine: &mut dyn NetEngine,
+    img: &Planar,
+    (tw, th): (usize, usize),
+    pad: usize,
+    scale: usize,
+    out: &mut Planar,
+    mut memory: Option<&mut TileMemory>,
+    side: Option<&SideInputs>,
+) -> Result<(), EngineError> {
+    let (tw, th) = (tw.max(1), th.max(1));
     if (out.w, out.h) != (img.w * scale, img.h * scale) {
         *out = Planar::zeros(img.w * scale, img.h * scale);
         if let Some(m) = memory.as_deref_mut() {
@@ -338,86 +361,85 @@ fn tiled_grid(
     }
     let remember = memory.is_some();
     let previous: &[Option<Planar>] = memory.as_deref().map_or(&[], |m| &m.inputs);
-    let next = AtomicUsize::new(0);
-    let stop = AtomicBool::new(false);
-    let (tx_res, rx_res) =
-        std::sync::mpsc::sync_channel::<Result<Done, EngineError>>(workers.max(1));
+    let slots = engine.max_in_flight().max(1);
+    let mut in_flight: Vec<(Ticket, usize)> = Vec::with_capacity(slots);
+    let (mut next, mut reused) = (0usize, 0u64);
+    let mut first_err: Option<EngineError> = None;
+    let mut learned: Vec<(usize, Planar)> = Vec::new();
 
-    let (result, learned, reused) = std::thread::scope(|s| {
-        for _ in 0..workers.max(1) {
-            let (next, stop, tiles, run, tx_res) = (&next, &stop, &tiles, &run, tx_res.clone());
-            s.spawn(move || {
-                loop {
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    if i >= tiles.len() || stop.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let (x, y, w, h) = tiles[i];
-                    let input = img.region(
-                        x as isize - pad as isize,
-                        y as isize - pad as isize,
-                        w + 2 * pad,
-                        h + 2 * pad,
-                    );
-                    let unchanged = previous
-                        .get(i)
-                        .and_then(Option::as_ref)
-                        .is_some_and(|p| within(p, &input, REUSE_MAX_DIFF));
-                    let r = if unchanged {
-                        Ok(Done::Reused)
-                    } else {
-                        run(&input).and_then(|res| {
-                            if res.w == input.w * scale && res.h == input.h * scale {
-                                Ok(Done::Ran(i, res, remember.then_some(input)))
-                            } else {
-                                Err(EngineError::Internal(format!(
-                                    "model returned {}×{} for a {}×{} tile at ×{scale}",
-                                    res.w, res.h, input.w, input.h
-                                )))
-                            }
-                        })
-                    };
-                    if r.is_err() {
-                        stop.store(true, Ordering::Relaxed);
-                    }
-                    if tx_res.send(r).is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-        drop(tx_res);
-        // Stitch on this thread as results arrive (blits are disjoint).
-        let mut first_err = None;
-        let mut learned = Vec::new();
-        let mut reused = 0u64;
-        for r in rx_res {
-            match r {
-                Ok(Done::Ran(i, res, input)) if first_err.is_none() => {
-                    let (x, y, w, h) = tiles[i];
-                    let interior = Rect {
-                        x: pad * scale,
-                        y: pad * scale,
-                        w: w * scale,
-                        h: h * scale,
-                    };
-                    out.blit(&res, interior, x * scale, y * scale);
-                    if let Some(input) = input {
-                        learned.push((i, input));
-                    }
-                }
-                Ok(Done::Reused) => reused += 1,
-                Ok(_) => {}
-                Err(e) => {
-                    stop.store(true, Ordering::Relaxed);
-                    first_err.get_or_insert(e);
-                }
+    loop {
+        // Keep every slot busy.
+        while first_err.is_none() && in_flight.len() < slots && next < tiles.len() {
+            let i = next;
+            next += 1;
+            let (x, y, w, h) = tiles[i];
+            let input = img.region(
+                x as isize - pad as isize,
+                y as isize - pad as isize,
+                w + 2 * pad,
+                h + 2 * pad,
+            );
+            let unchanged = previous
+                .get(i)
+                .and_then(Option::as_ref)
+                .is_some_and(|p| within(p, &input, REUSE_MAX_DIFF));
+            if unchanged {
+                reused += 1;
+                continue;
+            }
+            match engine.submit(Tensor::Host(input), side.cloned()) {
+                Ok(t) => in_flight.push((t, i)),
+                Err(e) => first_err = Some(e),
             }
         }
-        (first_err.map_or(Ok(()), Err), learned, reused)
-    });
+        if in_flight.is_empty() {
+            break;
+        }
+        let Some(done) = engine.wait_any() else {
+            first_err.get_or_insert(EngineError::Internal(
+                "engine lost track of submitted tiles".into(),
+            ));
+            break;
+        };
+        let Some(pos) = in_flight.iter().position(|(t, _)| *t == done.ticket) else {
+            // Not ours: the engine failed as a whole (its threads are gone).
+            first_err.get_or_insert(
+                done.output
+                    .err()
+                    .unwrap_or_else(|| EngineError::Internal("unknown tile ticket".into())),
+            );
+            break;
+        };
+        let (_, i) = in_flight.swap_remove(pos);
+        let (x, y, w, h) = tiles[i];
+        let (iw, ih) = (w + 2 * pad, h + 2 * pad);
+        match done.output.and_then(Tensor::into_host) {
+            Ok(res) if res.w != iw * scale || res.h != ih * scale => {
+                first_err.get_or_insert(EngineError::Internal(format!(
+                    "model returned {}×{} for a {iw}×{ih} tile at ×{scale}",
+                    res.w, res.h
+                )));
+            }
+            Ok(res) if first_err.is_none() => {
+                let interior = Rect {
+                    x: pad * scale,
+                    y: pad * scale,
+                    w: w * scale,
+                    h: h * scale,
+                };
+                out.blit(&res, interior, x * scale, y * scale);
+                if let (true, Some(input)) = (remember, done.input) {
+                    learned.push((i, input));
+                }
+            }
+            Ok(_) => {} // after an error: discarded
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
     if let Some(m) = memory {
-        if result.is_err() {
+        if first_err.is_some() {
             // Part of `out` may be stale: start over next time.
             m.clear();
         } else {
@@ -428,7 +450,7 @@ fn tiled_grid(
             m.reused += reused;
         }
     }
-    result
+    first_err.map_or(Ok(()), Err)
 }
 
 /// Exact area-average resample for downscaling by any ratio ≥ 1, e.g. a
@@ -494,10 +516,10 @@ pub fn pad_to_multiple(img: &Planar, m: usize) -> Planar {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn ramp(w: usize, h: usize) -> Planar {
+    pub(crate) fn ramp(w: usize, h: usize) -> Planar {
         let mut p = Planar::zeros(w, h);
         for c in 0..3 {
             for y in 0..h {

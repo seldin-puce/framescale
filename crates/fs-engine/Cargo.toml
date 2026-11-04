@@ -12,6 +12,12 @@ links = "fs_ncnn"
 [features]
 # Vulkan/CPU inference via ncnn (built from the pinned source: `cargo xtask ncnn`).
 ncnn = ["dep:cxx", "dep:cxx-build", "dep:cmake"]
+# Backend names used across the workspace. `backend-ncnn` is `ncnn`.
+backend-ncnn = ["ncnn"]
+# Not implemented yet (docs/engine-audit.md): reserved so selection can
+# already be built and tested.
+backend-tensorrt = []
+backend-apple = []
 
 [dependencies]
 tracing = { workspace = true }

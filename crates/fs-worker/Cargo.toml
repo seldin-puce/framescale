@@ -12,9 +12,16 @@ name = "fs-worker"
 path = "src/main.rs"
 
 [features]
-default = ["ncnn"]
-# Real inference. Without it the worker falls back to the CPU reference backend.
+default = ["backend-ncnn"]
+# Real inference through ncnn (Vulkan, or ncnn's CPU path). Without any
+# backend the worker falls back to the CPU reference backend and warns.
+backend-ncnn = ["ncnn", "fs-engine/backend-ncnn"]
 ncnn = ["fs-engine/ncnn"]
+# Not implemented yet (docs/engine-audit.md): selection and the TensorRT
+# runtime probe are built, opening either backend stops with
+# `unimplemented!`.
+backend-tensorrt = ["fs-engine/backend-tensorrt", "dep:libloading"]
+backend-apple = ["fs-engine/backend-apple"]
 
 [dependencies]
 fs-types          = { workspace = true }
@@ -24,6 +31,7 @@ fs-proc           = { workspace = true }
 fs-hw             = { workspace = true }
 serde_json        = { workspace = true }
 crossbeam-channel = { workspace = true }
+libloading        = { workspace = true, optional = true }
 
 [dev-dependencies]
 fs-media = { workspace = true }

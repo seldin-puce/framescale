@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, bounded};
+use fs_engine::engine::EngineStats;
 use fs_engine::interp::{FALLBACK_CUT_THRESHOLD, Scheduler, Synth};
 use fs_engine::tiling::{TileController, TileTuner};
 use fs_engine::{EngineError, Frame, InferenceBackend, frame};
@@ -248,49 +249,21 @@ impl Run<'_> {
         };
         if now.duration_since(self.last_progress) >= Duration::from_millis(250) {
             self.last_progress = now;
+            let stats = self.backend.stats();
             self.emit.send(&WorkerEvent::Progress {
                 frames_in: self.frames_in,
                 frames_out: self.frames_out,
                 fps: self.fps_ewma,
                 segment,
+                engine: (stats != EngineStats::default()).then_some(stats),
             });
         }
     }
 }
 
-/// Pick the inference backend.
-///
-/// `FS_ENGINE=reference` forces the deterministic CPU reference backend (tests).
-/// Otherwise ncnn is used: Vulkan on the planned GPU, or ncnn's CPU path when
-/// no real GPU exists. A failure to load models is fatal, never a silent
-/// downgrade to the non-AI reference.
-fn select_backend(plan: &RenderPlan, emit: &Emitter) -> Result<Box<dyn InferenceBackend>, Fatal> {
-    if std::env::var("FS_ENGINE").as_deref() == Ok("reference") {
-        return Ok(Box::new(fs_engine::cpu::ReferenceBackend::new(
-            &plan.engine.stages,
-        )));
-    }
-    #[cfg(feature = "ncnn")]
-    {
-        let _ = emit;
-        crate::device::ncnn_backend(&plan.engine).map_err(Fatal::from)
-    }
-    #[cfg(not(feature = "ncnn"))]
-    {
-        emit.send(&WorkerEvent::Warning {
-            code: WarningCode::EncoderFallback,
-            message: "this build has no inference runtime; using the non-AI reference backend"
-                .into(),
-        });
-        Ok(Box::new(fs_engine::cpu::ReferenceBackend::new(
-            &plan.engine.stages,
-        )))
-    }
-}
-
 pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome, Fatal> {
     let plan = Arc::new(job.plan);
-    let mut backend = select_backend(&plan, emit)?;
+    let mut backend = crate::backend::select(&plan.engine, emit).map_err(Fatal::from)?;
     // The tile: as planned (a retry after a GPU fault), else as tuned earlier
     // for this device and these models, else tuned on this run's first frames
     // starting from the backend's default.

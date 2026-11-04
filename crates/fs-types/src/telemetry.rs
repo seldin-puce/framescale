@@ -59,7 +59,60 @@ pub struct Telemetry {
     pub at_ms: u64,
     pub device: DeviceTelemetry,
     pub render_fps: Option<f32>,
+    /// The running render's engine, from its progress reports.
+    pub engine: Option<EngineStats>,
     pub eco: EcoState,
     #[ts(type = "number | null")]
     pub disk_free_bytes: Option<u64>,
+}
+
+/// Which implementation runs the networks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum BackendKind {
+    /// Core ML on Apple Silicon (feature `backend-apple`).
+    Apple,
+    /// TensorRT on NVIDIA, loaded at runtime when installed (feature `backend-tensorrt`).
+    #[serde(rename = "tensorrt")]
+    TensorRt,
+    /// ncnn on Vulkan, or ncnn's CPU path (feature `backend-ncnn`).
+    Ncnn,
+    /// Deterministic non-AI CPU reference (tests).
+    Reference,
+    /// Test engine: the real pipeline and tiler with a fake network.
+    Mock,
+}
+
+impl BackendKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "apple" => Self::Apple,
+            "tensorrt" => Self::TensorRt,
+            "ncnn" => Self::Ncnn,
+            "reference" => Self::Reference,
+            "mock" => Self::Mock,
+            _ => return None,
+        })
+    }
+}
+
+/// What the engine reports about itself with each progress update.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EngineStats {
+    pub backend: Option<BackendKind>,
+    /// Tile edge in pixels the last frame ran with.
+    pub tile: Option<u32>,
+    /// Tiles a network can have running at once.
+    pub max_in_flight: Option<u32>,
+    /// Device memory the engine itself holds, where it can tell (the app's
+    /// sampler reports board-level VRAM).
+    #[ts(type = "number | null")]
+    pub vram_used: Option<u64>,
+    /// GPU load as the engine sees it, where it can tell.
+    pub gpu_load_pct: Option<f32>,
+    /// Share of tiles carried over unchanged from the previous frame.
+    pub reused_tiles_pct: Option<f32>,
 }

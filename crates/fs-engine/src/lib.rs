@@ -8,19 +8,28 @@
 //!   a hard cut (scdet table + a pixel-difference backstop).
 //! - [`frame::hash`]: sampled xxh3 used for frame-exact resume alignment.
 //!
+//! - [`engine::NetEngine`]: one network on one device, submit/wait with up to
+//!   `max_in_flight` tiles outstanding; [`planar::run_tiled`] drives it.
+//!   [`engine::ThreadedEngine`] runs any blocking per-tile call that way.
+//!
 //! Backends:
 //! - [`cpu::ReferenceBackend`]: nearest-neighbour scale + linear blend. **Not
 //!   AI**: a deterministic reference that exercises the whole pipeline in tests
 //!   and CI on machines without a GPU.
-//! - [`ncnn`] (feature `ncnn`): Vulkan inference everywhere (MoltenVK on
-//!   macOS), with ncnn's CPU path as a fallback. Real-ESRGAN + RIFE v4.6.
-//! - `coreml`, `tensorrt`: later, behind the same trait.
+//! - [`mock::MockBackend`]: the real tiler and scheduler with a fake network
+//!   (`FS_ENGINE=mock`); equals the reference pixel for pixel.
+//! - [`ncnn`] (feature `ncnn`, alias `backend-ncnn`): Vulkan inference
+//!   everywhere (MoltenVK on macOS), with ncnn's CPU path as a fallback.
+//! - Core ML (`backend-apple`) and TensorRT (`backend-tensorrt`): not
+//!   implemented yet; docs/engine-audit.md has the plan.
 #![deny(unsafe_code)]
 
 pub mod cpu;
+pub mod engine;
 pub mod face;
 pub mod frame;
 pub mod interp;
+pub mod mock;
 #[cfg(feature = "ncnn")]
 pub mod ncnn;
 pub mod planar;
@@ -84,5 +93,9 @@ pub trait InferenceBackend: Send {
     /// One line about the run so far, for the log.
     fn report(&self) -> Option<String> {
         None
+    }
+    /// Backend, tile and reuse figures for the progress reports.
+    fn stats(&self) -> engine::EngineStats {
+        engine::EngineStats::default()
     }
 }

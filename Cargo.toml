@@ -59,6 +59,7 @@ directories        = "6.0.0"
 
 # --- hardware -----------------------------------------------------------------
 ash          = { version = "0.38.0", default-features = false, features = ["std", "loaded", "debug"] }
+libloading = "0.8.9"        # TensorRT/CUDA probe (feature `backend-tensorrt`): dlopen only, never linked
 nvml-wrapper = "0.13.0"   # dlopen()s libnvidia-ml at runtime: no link-time NVIDIA dependency
 sysinfo      = "0.40.1"
 

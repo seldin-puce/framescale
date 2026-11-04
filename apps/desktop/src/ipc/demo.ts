@@ -5,6 +5,7 @@
 import type {
   DeviceUuid,
   EcoMode,
+  EngineStats,
   GpuDevice,
   JobEvent,
   JobId,
@@ -14,6 +15,16 @@ import type {
   Telemetry,
 } from "@framescale/ipc-types";
 import type { Backend, CmdError } from "./backend";
+
+/** What a real ncnn render reports about its engine (shown with progress). */
+const demoEngine: EngineStats = {
+  backend: "ncnn",
+  tile: 256,
+  maxInFlight: 2,
+  vramUsed: null,
+  gpuLoadPct: null,
+  reusedTilesPct: 12,
+};
 
 const GiB = 1024 ** 3;
 
@@ -145,6 +156,7 @@ export function createDemoBackend(): Backend {
         etaS: (total - s.framesDone) / fpsNow,
         segment: Math.floor(s.framesDone / 96),
         segmentsTotal: Math.ceil(total / 96),
+        engine: demoEngine,
       });
       if (s.framesDone >= total) setState(active, "muxing");
     } else if (s.state === "muxing") {
@@ -281,6 +293,7 @@ export function createDemoBackend(): Backend {
             powerPct: null,
           },
           renderFps: renderFps == null ? null : renderFps * duty,
+          engine: busy ? demoEngine : null,
           eco: { mode: eco, duty, throttling: duty < 0.999, onBattery: false },
           diskFreeBytes: 412 * GiB - (renderFps ? Date.now() % 1e6 : 0),
         };

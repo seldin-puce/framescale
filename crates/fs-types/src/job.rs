@@ -8,6 +8,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::pipeline::JobSpec;
+use crate::telemetry::EngineStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export, type = "string")]
@@ -144,6 +145,8 @@ pub enum WarningCode {
     CorruptPackets,
     ThermalThrottled,
     TileReduced,
+    /// The preferred inference backend couldn't start; the next one runs.
+    BackendFallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -160,6 +163,8 @@ pub struct JobProgress {
     pub eta_s: Option<f64>,
     pub segment: u32,
     pub segments_total: u32,
+    /// Backend, tile size and tile reuse, when the engine reports them.
+    pub engine: Option<EngineStats>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

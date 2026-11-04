@@ -5,6 +5,7 @@ export const IPC_PROTOCOL_VERSION = 1 as const;
 
 export type { AnalysisReport } from "./generated/AnalysisReport";
 export type { AudioStream } from "./generated/AudioStream";
+export type { BackendKind } from "./generated/BackendKind";
 export type { ColorPrimaries } from "./generated/ColorPrimaries";
 export type { ColorProfile } from "./generated/ColorProfile";
 export type { ColorRange } from "./generated/ColorRange";
@@ -19,6 +20,7 @@ export type { DownloadProgress } from "./generated/DownloadProgress";
 export type { EcoMode } from "./generated/EcoMode";
 export type { EcoState } from "./generated/EcoState";
 export type { EncoderPreference } from "./generated/EncoderPreference";
+export type { EngineStats } from "./generated/EngineStats";
 export type { FailureKind } from "./generated/FailureKind";
 export type { FieldOrder } from "./generated/FieldOrder";
 export type { GpuDevice } from "./generated/GpuDevice";

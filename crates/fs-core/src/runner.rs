@@ -578,7 +578,7 @@ async fn run_worker_once(
                 let Ok(Some(line)) = line else { break };
                 let Ok(ev) = serde_json::from_str::<WorkerEvent>(&line) else { continue };
                 match ev {
-                    WorkerEvent::Progress { frames_in, fps, segment, .. } => {
+                    WorkerEvent::Progress { frames_in, fps, segment, engine, .. } => {
                         let done = start.first_frame + frames_in;
                         let remaining = plan.total_frames.saturating_sub(done);
                         let _ = ctx.events.send(JobEvent::Progress(JobProgress {
@@ -589,6 +589,7 @@ async fn run_worker_once(
                             eta_s: (fps > 0.01).then(|| remaining as f64 / f64::from(fps)),
                             segment,
                             segments_total,
+                            engine,
                         }));
                     }
                     WorkerEvent::SegmentCommitted(s) => {

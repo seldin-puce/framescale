@@ -5,6 +5,7 @@
 //! over dedicated pipes between this process and its FFmpeg children.
 #![deny(unsafe_code)]
 
+mod backend;
 mod control;
 #[cfg(feature = "ncnn")]
 mod device;

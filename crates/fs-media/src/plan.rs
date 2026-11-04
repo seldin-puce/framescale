@@ -205,6 +205,7 @@ pub fn compile(i: &PlanInputs<'_>) -> Result<Planned, PlanError> {
             models_dir,
             downloads_dir: i.downloads_dir.map(str::to_owned),
             tile_cache: i.tile_cache.map(str::to_owned),
+            backend: None,
         },
         total_frames,
         segment_frames: rate::segment_frames(conform, SEGMENT_SECONDS),

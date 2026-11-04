@@ -10,8 +10,10 @@ use crate::device::DeviceUuid;
 use crate::job::{FailureKind, JobId, WarningCode};
 use crate::media::{ColorProfile, Rational};
 use crate::pipeline::StageConfig;
+use crate::telemetry::{BackendKind, EngineStats};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// 2: `Progress.engine`, `EnginePlan.backend`.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Worker process exit codes. The supervisor maps them to recovery actions.
 pub mod exit {
@@ -146,6 +148,9 @@ pub struct EnginePlan {
     /// when there's no entry yet. `None`: no tuning.
     #[serde(default)]
     pub tile_cache: Option<String>,
+    /// Run on this backend instead of the detected one (user override).
+    #[serde(default)]
+    pub backend: Option<BackendKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,6 +262,8 @@ pub enum WorkerEvent {
         frames_out: u64,
         fps: f32,
         segment: u32,
+        #[serde(default)]
+        engine: Option<EngineStats>,
     },
     SegmentCommitted(SegmentInfo),
     Warning {

@@ -7,11 +7,13 @@
 #![allow(unsafe_code)] // cxx bridge
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use cxx::UniquePtr;
 use fs_types::pipeline::StageConfig;
 use fs_types::worker::EnginePlan;
 
+use crate::engine::{BackendKind, EngineStats, SideInputs, ThreadedEngine};
 use crate::face;
 use crate::planar::{self, Planar, Rect};
 use crate::{EngineError, Frame, InferenceBackend};
@@ -153,12 +155,73 @@ fn resolve_rife(models: &Path, id: &str) -> Result<(PathBuf, usize), EngineError
     Ok((models.join("rife").join(id), align))
 }
 
+/// An upscale network, with the threads that keep its tiles in flight.
 struct Sr {
-    model: UniquePtr<ffi::Model>,
-    native: usize,
+    engine: ThreadedEngine<'static>,
     target: usize,
     /// Tile sides must be multiples of this (RRDBNet ×2 pixel-unshuffles by 2).
     align: usize,
+}
+
+/// The tile edge a padded tile came from, for error messages.
+fn tile_of(t: &Planar, pad: usize) -> u32 {
+    t.w.max(t.h).saturating_sub(2 * pad) as u32
+}
+
+impl Sr {
+    /// `slots` tiles in flight: 2 on a GPU (one uploads and downloads while
+    /// the other computes), one per CPU worker otherwise.
+    fn new(
+        model: UniquePtr<ffi::Model>,
+        native: usize,
+        target: usize,
+        align: usize,
+        slots: usize,
+    ) -> Result<Self, EngineError> {
+        let model = Arc::new(model);
+        let run = move |t: &Planar, _: Option<&SideInputs>| -> Result<Planar, EngineError> {
+            // Odd frame sizes: repeat the last row/column, crop it after.
+            let (w, h) = (t.w.next_multiple_of(align), t.h.next_multiple_of(align));
+            let padded;
+            let src = if (w, h) == (t.w, t.h) {
+                t
+            } else {
+                padded = t.region(0, 0, w, h);
+                &padded
+            };
+            let mut o = Planar::zeros(w * native, h * native);
+            model
+                .run_sr(
+                    &src.data,
+                    w as i32,
+                    h as i32,
+                    &mut o.data,
+                    o.w as i32,
+                    o.h as i32,
+                )
+                .map_err(|e| map_err(&e, tile_of(t, SR_PAD)))?;
+            let o = if (w, h) == (t.w, t.h) {
+                o
+            } else {
+                o.region(0, 0, t.w * native, t.h * native)
+            };
+            // A native ×4 model asked for ×3 (×2 pools on the GPU):
+            // area-downscale each tile here, on the tile's thread, while the
+            // GPU runs the next tile. Whole input pixels map to whole output
+            // pixels at both scales, so this equals downscaling the stitched
+            // frame (which kept the GPU idle for a third of every frame).
+            Ok(if native == target {
+                o
+            } else {
+                planar::area_resample(&o, t.w * target, t.h * target)
+            })
+        };
+        Ok(Self {
+            engine: ThreadedEngine::spawn("upscale", slots, Arc::new(run))?,
+            target,
+            align,
+        })
+    }
 }
 
 /// Context Real-CUGAN ×2 consumes on each side (valid convolutions:
@@ -176,11 +239,36 @@ const CUGAN_STATS_AREA_CPU: f64 = 256.0 * 256.0;
 /// area downscale back to the input size. (The ncnn Pro models take and give
 /// plain 0–1 RGB like SE; measured, no extra normalization.)
 struct Cugan {
-    model: UniquePtr<ffi::Model>,
+    /// Also used directly, for the whole-frame statistics pass.
+    model: Arc<UniquePtr<ffi::Model>>,
+    engine: ThreadedEngine<'static>,
     stats_area: f64,
 }
 
 impl Cugan {
+    fn new(
+        model: UniquePtr<ffi::Model>,
+        stats_area: f64,
+        slots: usize,
+    ) -> Result<Self, EngineError> {
+        let model = Arc::new(model);
+        let m = model.clone();
+        // The frame's statistics come with every tile as side inputs.
+        let run = move |t: &Planar, side: Option<&SideInputs>| -> Result<Planar, EngineError> {
+            let side = side.ok_or_else(|| {
+                EngineError::Internal("Real-CUGAN tile without frame statistics".into())
+            })?;
+            let lens: Vec<i32> = side.iter().map(|(_, v)| v.len() as i32).collect();
+            let gaps: Vec<f32> = side.iter().flat_map(|(_, v)| v.iter().copied()).collect();
+            cugan_tile(&m, t, &gaps, &lens, tile_of(t, CUGAN_PAD))
+        };
+        Ok(Self {
+            model,
+            engine: ThreadedEngine::spawn("denoise", slots, Arc::new(run))?,
+            stats_area,
+        })
+    }
+
     /// SE statistics of the whole frame (from a downscaled copy).
     fn stats(&self, img: &Planar) -> Result<(Vec<f32>, Vec<i32>), EngineError> {
         let f = ((img.w * img.h) as f64 / self.stats_area).sqrt().max(1.0);
@@ -204,62 +292,80 @@ impl Cugan {
         Ok((gaps, lens))
     }
 
-    /// One padded tile (`(w + 36) × (h + 36)`) → `2·(w + 36) × 2·(h + 36)`
-    /// as `tiled_into` expects; only the interior (the network output) is used.
-    fn tile(
-        &self,
-        t: &Planar,
-        gaps: &[f32],
-        lens: &[i32],
-        tile: u32,
-    ) -> Result<Planar, EngineError> {
-        let (w, h) = (t.w - 2 * CUGAN_PAD, t.h - 2 * CUGAN_PAD);
-        // The network needs even sizes: extend by one replicated column/row.
-        let (ew, eh) = (w + w % 2, h + h % 2);
-        let owned;
-        let input = if (ew, eh) == (w, h) {
-            t
-        } else {
-            owned = t.region(0, 0, ew + 2 * CUGAN_PAD, eh + 2 * CUGAN_PAD);
-            &owned
-        };
-        let mut net = Planar::zeros(ew * 2, eh * 2);
-        self.model
-            .run_cugan(
-                &input.data,
-                input.w as i32,
-                input.h as i32,
-                gaps,
-                lens,
-                &mut net.data,
-                net.w as i32,
-                net.h as i32,
-            )
-            .map_err(|e| map_err(&e, tile))?;
-        let mut out = Planar::zeros(t.w * 2, t.h * 2);
-        let r = Rect {
-            x: 0,
-            y: 0,
-            w: w * 2,
-            h: h * 2,
-        };
-        out.blit(&net, r, CUGAN_PAD * 2, CUGAN_PAD * 2);
-        Ok(out)
-    }
-
     fn denoise(
-        &self,
+        &mut self,
         img: &Planar,
         tile: u32,
-        workers: usize,
         scratch: &mut Planar,
     ) -> Result<Planar, EngineError> {
         let (gaps, lens) = self.stats(img)?;
-        planar::tiled_into(img, tile as usize, CUGAN_PAD, 2, workers, scratch, |t| {
-            self.tile(t, &gaps, &lens, tile)
-        })?;
+        let mut side = Vec::with_capacity(lens.len());
+        let mut off = 0usize;
+        for (i, &n) in lens.iter().enumerate() {
+            let n = usize::try_from(n).unwrap_or(0);
+            let v = gaps.get(off..off + n).ok_or_else(|| {
+                EngineError::Internal("Real-CUGAN statistics don't add up".into())
+            })?;
+            side.push((format!("gap{i}"), v.to_vec()));
+            off += n;
+        }
+        let t = (tile as usize).max(16);
+        let side: SideInputs = Arc::new(side);
+        planar::run_tiled(
+            &mut self.engine,
+            img,
+            (t, t),
+            CUGAN_PAD,
+            2,
+            scratch,
+            None,
+            Some(&side),
+        )?;
         Ok(planar::area_resample(scratch, img.w, img.h))
     }
+}
+
+/// One padded Real-CUGAN tile (`(w + 36) × (h + 36)`) → `2·(w + 36) × 2·(h + 36)`
+/// as the tiler expects; only the interior (the network output) is used.
+fn cugan_tile(
+    model: &ffi::Model,
+    t: &Planar,
+    gaps: &[f32],
+    lens: &[i32],
+    tile: u32,
+) -> Result<Planar, EngineError> {
+    let (w, h) = (t.w - 2 * CUGAN_PAD, t.h - 2 * CUGAN_PAD);
+    // The network needs even sizes: extend by one replicated column/row.
+    let (ew, eh) = (w + w % 2, h + h % 2);
+    let owned;
+    let input = if (ew, eh) == (w, h) {
+        t
+    } else {
+        owned = t.region(0, 0, ew + 2 * CUGAN_PAD, eh + 2 * CUGAN_PAD);
+        &owned
+    };
+    let mut net = Planar::zeros(ew * 2, eh * 2);
+    model
+        .run_cugan(
+            &input.data,
+            input.w as i32,
+            input.h as i32,
+            gaps,
+            lens,
+            &mut net.data,
+            net.w as i32,
+            net.h as i32,
+        )
+        .map_err(|e| map_err(&e, tile))?;
+    let mut out = Planar::zeros(t.w * 2, t.h * 2);
+    let r = Rect {
+        x: 0,
+        y: 0,
+        w: w * 2,
+        h: h * 2,
+    };
+    out.blit(&net, r, CUGAN_PAD * 2, CUGAN_PAD * 2);
+    Ok(out)
 }
 
 /// Context pixels around each NAFNet tile: its U-Net sees far.
@@ -271,26 +377,16 @@ const NAF_ALIGN: usize = 16;
 /// strength mixes its output with the input. Its channel attention averages
 /// over each tile, which is close to the 256 px crops it was trained on.
 struct Naf {
-    model: UniquePtr<ffi::Model>,
-    strength: f32,
+    engine: ThreadedEngine<'static>,
 }
 
 impl Naf {
-    fn denoise(
-        &self,
-        img: &Planar,
-        tile: u32,
-        workers: usize,
-        scratch: &mut Planar,
-        memory: Option<&mut planar::TileMemory>,
-    ) -> Result<Planar, EngineError> {
-        // Twice the SR tile (it still halves with the controller on OOM),
-        // split evenly: each tile's channel attention then sees a similar area.
-        let size = tile as usize * 2;
-        let run = |t: &Planar| {
+    fn new(model: UniquePtr<ffi::Model>, strength: f32, slots: usize) -> Result<Self, EngineError> {
+        let model = Arc::new(model);
+        let run = move |t: &Planar, _: Option<&SideInputs>| -> Result<Planar, EngineError> {
             let p = planar::pad_to_multiple(t, NAF_ALIGN);
             let mut o = Planar::zeros(p.w, p.h);
-            self.model
+            model
                 .run_sr(
                     &p.data,
                     p.w as i32,
@@ -299,27 +395,46 @@ impl Naf {
                     p.w as i32,
                     p.h as i32,
                 )
-                .map_err(|e| map_err(&e, tile))?;
+                .map_err(|e| map_err(&e, tile_of(t, NAF_PAD)))?;
             let mut o = if (p.w, p.h) == (t.w, t.h) {
                 o
             } else {
                 o.region(0, 0, t.w, t.h)
             };
-            if self.strength < 1.0 {
+            if strength < 1.0 {
                 for (v, s) in o.data.iter_mut().zip(&t.data) {
-                    *v = s + self.strength * (*v - s);
+                    *v = s + strength * (*v - s);
                 }
             }
             Ok(o)
         };
-        // A NAFNet tile depends only on its padded input (its attention
+        Ok(Self {
+            engine: ThreadedEngine::spawn("denoise", slots, Arc::new(run))?,
+        })
+    }
+
+    fn denoise(
+        &mut self,
+        img: &Planar,
+        tile: u32,
+        scratch: &mut Planar,
+        memory: Option<&mut planar::TileMemory>,
+    ) -> Result<Planar, EngineError> {
+        // Twice the SR tile (it still halves with the controller on OOM),
+        // split evenly: each tile's channel attention then sees a similar
+        // area. A NAFNet tile depends only on its padded input (its attention
         // averages within the tile), so unchanged tiles can keep their output.
-        match memory {
-            Some(m) => {
-                planar::tiled_into_even_reusing(img, size, NAF_PAD, 1, workers, scratch, m, run)?;
-            }
-            None => planar::tiled_into_even(img, size, NAF_PAD, 1, workers, scratch, run)?,
-        }
+        let grid = planar::even_grid(img, tile as usize * 2);
+        planar::run_tiled(
+            &mut self.engine,
+            img,
+            grid,
+            NAF_PAD,
+            1,
+            scratch,
+            memory,
+            None,
+        )?;
         Ok(scratch.clone())
     }
 }
@@ -334,16 +449,15 @@ impl Denoiser {
     /// `memory`: reuse unchanged tiles (NAFNet; Real-CUGAN's tiles depend on
     /// whole-frame statistics, so it always runs).
     fn denoise(
-        &self,
+        &mut self,
         img: &Planar,
         tile: u32,
-        workers: usize,
         scratch: &mut Planar,
         memory: Option<&mut planar::TileMemory>,
     ) -> Result<Planar, EngineError> {
         match self {
-            Self::Cugan(c) => c.denoise(img, tile, workers, scratch),
-            Self::Naf(n) => n.denoise(img, tile, workers, scratch, memory),
+            Self::Cugan(c) => c.denoise(img, tile, scratch),
+            Self::Naf(n) => n.denoise(img, tile, scratch, memory),
         }
     }
 }
@@ -506,6 +620,8 @@ pub struct NcnnBackend {
     reuse: bool,
     sr_memory: planar::TileMemory,
     dn_memory: planar::TileMemory,
+    /// Tile size of the last frame (for the progress reports).
+    last_tile: Option<u32>,
 }
 
 /// `FS_TILE_REUSE=0` turns tile reuse off (comparisons, benchmarks).
@@ -749,6 +865,9 @@ impl NcnnBackend {
             _ => 1,
         };
         let threads = if tile_parallel { 1 } else { threads };
+        // Tiles in flight per network: two on a GPU (one transfers while the
+        // other computes; more was measured not to help), one per CPU worker.
+        let slots = if device.index >= 0 { 2 } else { cpu_workers };
         let mut sr = None;
         let mut denoise = None;
         let mut face_fix = None;
@@ -769,25 +888,27 @@ impl NcnnBackend {
                     nets.push(format!("denoise:{}", model.id));
                     if model.id == "nafnet-sidd" {
                         let dir = models.join("nafnet");
-                        denoise = Some(Denoiser::Naf(Naf {
-                            model: load(
+                        denoise = Some(Denoiser::Naf(Naf::new(
+                            load(
                                 &device,
                                 threads,
                                 &dir.join("NAFNet-SIDD-width32.param"),
                                 &dir.join("NAFNet-SIDD-width32.bin"),
                             )?,
-                            strength: NAF_STRENGTH[usize::from((*strength).min(3))],
-                        }));
+                            NAF_STRENGTH[usize::from((*strength).min(3))],
+                            slots,
+                        )?));
                     } else {
                         let (param, bin) = resolve_cugan(models, &model.id, *strength)?;
-                        denoise = Some(Denoiser::Cugan(Cugan {
-                            model: load(&device, threads, &param, &bin)?,
-                            stats_area: if device.index >= 0 {
+                        denoise = Some(Denoiser::Cugan(Cugan::new(
+                            load(&device, threads, &param, &bin)?,
+                            if device.index >= 0 {
                                 CUGAN_STATS_AREA_GPU
                             } else {
                                 CUGAN_STATS_AREA_CPU
                             },
-                        }));
+                            slots,
+                        )?));
                     }
                 }
                 StageConfig::FaceFix { model, fidelity } => {
@@ -832,16 +953,12 @@ impl NcnnBackend {
                     } else {
                         load_sr(&device, threads, &param, &bin, pool)?
                     };
-                    sr = Some(Sr {
-                        model: net,
-                        native: native / pool,
-                        target,
-                        align: if param.ends_with(format!("{X2PLUS}.param")) {
-                            2
-                        } else {
-                            1
-                        },
-                    });
+                    let align = if param.ends_with(format!("{X2PLUS}.param")) {
+                        2
+                    } else {
+                        1
+                    };
+                    sr = Some(Sr::new(net, native / pool, target, align, slots)?);
                 }
                 StageConfig::Interpolate { model, .. } => {
                     if model.path.is_some() {
@@ -898,6 +1015,7 @@ impl NcnnBackend {
             reuse: !reuse_disabled(),
             sr_memory: planar::TileMemory::default(),
             dn_memory: planar::TileMemory::default(),
+            last_tile: None,
         })
     }
 }
@@ -930,8 +1048,9 @@ impl InferenceBackend for NcnnBackend {
         if self.denoise.is_none() && self.sr.is_none() && self.face.is_none() {
             return Ok(input.clone());
         }
-        // Two in-flight tiles keep the GPU busy while the CPU slices/stitches;
-        // the output buffer is reused across frames (no 100 MB page-faulting).
+        // Each network keeps its tiles in flight on its own engine threads
+        // (2 on a GPU); the output buffers are reused across frames (no
+        // 100 MB page-faulting).
         let workers = if self.gpu { 2 } else { self.cpu_workers };
         // Tile-parallel CPU: about eight tiles per worker so slow cores don't
         // leave the rest idle at the end of a frame (measured: 640×360 at 8
@@ -943,77 +1062,34 @@ impl InferenceBackend for NcnnBackend {
         } else {
             tile
         };
+        self.last_tile = Some(tile);
         let mut img = planar::from_frame(input);
-        if let Some(dn) = self.denoise.as_ref() {
+        if let Some(dn) = self.denoise.as_mut() {
             let memory = self.reuse.then_some(&mut self.dn_memory);
-            img = dn.denoise(&img, tile, workers, &mut self.dn_scratch, memory)?;
+            img = dn.denoise(&img, tile, &mut self.dn_scratch, memory)?;
         }
-        let Some(sr) = self.sr.as_ref() else {
+        let Some(sr) = self.sr.as_mut() else {
             if let Some(ff) = self.face.as_ref() {
                 self.faces = ff.fix(&mut img)?;
             }
             return Ok(planar::to_frame(&img, input.format));
         };
-        let (native, target, model, align) = (sr.native, sr.target, &sr.model, sr.align);
         // Aligned tiles (SR_PAD is even) keep every tile's 2×2 unshuffle
         // grid in phase with the frame's, or neighbours disagree at seams.
-        let sr_tile = (tile as usize / align * align).max(16);
-        let run = |t: &Planar| {
-            // Odd frame sizes: repeat the last row/column, crop it after.
-            let (w, h) = (t.w.next_multiple_of(align), t.h.next_multiple_of(align));
-            let padded;
-            let src = if (w, h) == (t.w, t.h) {
-                t
-            } else {
-                padded = t.region(0, 0, w, h);
-                &padded
-            };
-            let mut o = Planar::zeros(w * native, h * native);
-            model
-                .run_sr(
-                    &src.data,
-                    w as i32,
-                    h as i32,
-                    &mut o.data,
-                    o.w as i32,
-                    o.h as i32,
-                )
-                .map_err(|e| map_err(&e, tile))?;
-            let o = if (w, h) == (t.w, t.h) {
-                o
-            } else {
-                o.region(0, 0, t.w * native, t.h * native)
-            };
-            // A native ×4 model asked for ×3 (×2 pools on the GPU):
-            // area-downscale each tile here, on the tile's worker, while
-            // the GPU runs the next tile. Whole input pixels map to whole
-            // output pixels at both scales, so this equals downscaling
-            // the stitched frame (which kept the GPU idle for a third of
-            // every frame).
-            Ok(if native == target {
-                o
-            } else {
-                planar::area_resample(&o, t.w * target, t.h * target)
-            })
-        };
-        let (img_ref, scratch) = (&img, &mut self.scratch);
-        if self.reuse {
-            // Tiles whose input (context included) is unchanged since the
-            // last frame keep their output: still parts of a shot cost
-            // nothing.
-            planar::tiled_into_reusing(
-                img_ref,
-                sr_tile,
-                SR_PAD,
-                target,
-                workers,
-                scratch,
-                &mut self.sr_memory,
-                run,
-            )?;
-        } else {
-            planar::tiled_into(img_ref, sr_tile, SR_PAD, target, workers, scratch, run)?;
-        }
+        let sr_tile = (tile as usize / sr.align * sr.align).max(16);
+        // Tiles whose input (context included) is unchanged since the last
+        // frame keep their output: still parts of a shot cost nothing.
+        let memory = self.reuse.then_some(&mut self.sr_memory);
+        planar::run_tiled(
+            &mut sr.engine,
+            &img,
+            (sr_tile, sr_tile),
+            SR_PAD,
+            sr.target,
+            &mut self.scratch,
+            memory,
+            None,
+        )?;
         // Face Fix works on the final (upscaled) pixels, on a copy when the
         // output buffer carries reused tiles into the next frame.
         let frame = match self.face.as_ref() {
@@ -1036,6 +1112,20 @@ impl InferenceBackend for NcnnBackend {
         if !self.reuse {
             self.sr_memory.clear();
             self.dn_memory.clear();
+        }
+    }
+
+    fn stats(&self) -> EngineStats {
+        let (tiles, reused) = (
+            self.sr_memory.tiles + self.dn_memory.tiles,
+            self.sr_memory.reused + self.dn_memory.reused,
+        );
+        EngineStats {
+            backend: Some(BackendKind::Ncnn),
+            tile: self.last_tile,
+            max_in_flight: Some(if self.gpu { 2 } else { self.cpu_workers as u32 }),
+            reused_tiles_pct: (tiles > 0).then(|| (100.0 * reused as f64 / tiles as f64) as f32),
+            ..EngineStats::default()
         }
     }
 

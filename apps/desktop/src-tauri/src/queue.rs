@@ -57,7 +57,10 @@ pub async fn run(app: tauri::AppHandle, state: Arc<AppState>) {
             tauri::async_runtime::spawn(async move {
                 while let Some(ev) = ev_rx.recv().await {
                     if let JobEvent::Progress(p) = &ev {
-                        state.telemetry.send_modify(|t| t.render_fps = Some(p.fps));
+                        state.telemetry.send_modify(|t| {
+                            t.render_fps = Some(p.fps);
+                            t.engine = p.engine.clone();
+                        });
                     }
                     state.emit(ev);
                 }
@@ -65,7 +68,10 @@ pub async fn run(app: tauri::AppHandle, state: Arc<AppState>) {
         };
         let final_state = fs_core::run_job(job.id, svc, ev_tx, cmd_rx).await;
         let _ = forward.await;
-        state.telemetry.send_modify(|t| t.render_fps = None);
+        state.telemetry.send_modify(|t| {
+            t.render_fps = None;
+            t.engine = None;
+        });
         if let Ok(mut a) = state.active.lock() {
             *a = None;
         }

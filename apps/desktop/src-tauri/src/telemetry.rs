@@ -65,6 +65,7 @@ pub async fn run(state: Arc<AppState>) {
                 at_ms: crate::state::now_secs() * 1000,
                 device: dev,
                 render_fps: t.render_fps,
+                engine: t.engine.clone(),
                 eco: EcoState {
                     mode,
                     duty,

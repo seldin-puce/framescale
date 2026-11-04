@@ -29,4 +29,4 @@ pub use pipeline::{
     StageConfig, StageKind, VideoCodec,
 };
 pub use preview::{CompareInfo, CompareSide, PreviewProgress, PreviewResult};
-pub use telemetry::{DeviceTelemetry, EcoMode, EcoState, Telemetry};
+pub use telemetry::{BackendKind, DeviceTelemetry, EcoMode, EcoState, EngineStats, Telemetry};

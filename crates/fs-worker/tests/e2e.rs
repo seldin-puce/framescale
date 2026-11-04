@@ -172,12 +172,23 @@ struct RunLog {
     stopped: Option<u32>,
     exit: i32,
     errors: Vec<String>,
+    warnings: Vec<(fs_types::WarningCode, String)>,
+    engine: Option<fs_types::EngineStats>,
 }
 
 fn run_worker(plan: &RenderPlan, start: StartPoint, stop_after_ready: bool) -> RunLog {
+    // Deterministic non-AI backend: these tests check pixels bit-exactly.
+    run_engine(plan, start, stop_after_ready, &[("FS_ENGINE", "reference")])
+}
+
+fn run_engine(
+    plan: &RenderPlan,
+    start: StartPoint,
+    stop_after_ready: bool,
+    env: &[(&str, &str)],
+) -> RunLog {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fs-worker"))
-        // Deterministic non-AI backend: these tests check pixels bit-exactly.
-        .env("FS_ENGINE", "reference")
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -217,6 +228,10 @@ fn run_worker(plan: &RenderPlan, start: StartPoint, stop_after_ready: bool) -> R
             } => log.finished = Some((frames_in, frames_out)),
             WorkerEvent::Stopped { next_segment } => log.stopped = Some(next_segment),
             WorkerEvent::Error { message, .. } => log.errors.push(message),
+            WorkerEvent::Warning { code, message } => log.warnings.push((code, message)),
+            WorkerEvent::Progress {
+                engine: Some(e), ..
+            } => log.engine = Some(e),
             _ => {}
         }
     }
@@ -363,4 +378,73 @@ fn full_run_cut_holds_and_bit_exact_resume() {
         fin.audio[0].start_time
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The mock engine runs the real worker pipeline (decode → tiler and
+/// scheduler → interpolation → segments) and must produce exactly the
+/// reference backend's frames, also with more tiles in flight, after VRAM
+/// OOMs (the tile halves) and not at all once the device is lost.
+#[test]
+fn mock_engine_runs_the_real_pipeline_like_the_reference() {
+    let Some(t) = tools() else {
+        return eprintln!("skip: FS_FFMPEG/FS_FFPROBE unset");
+    };
+    let dir = tmp("mock");
+    let src = source(&t, &dir);
+    let start = || StartPoint {
+        segment: 0,
+        first_frame: 0,
+        expected_hash: None,
+    };
+    let render = |name: &str, env: &[(&str, &str)]| {
+        let seg = dir.join(name);
+        let (plan, _) = make_plan(&t, &src, &seg);
+        let log = run_engine(&plan, start(), false, env);
+        let md5 = (log.exit == exit::OK).then(|| {
+            let out = dir.join(format!("{name}.mkv"));
+            concat(&t, &seg, &log.committed, &out);
+            framemd5(&t, &out)
+        });
+        (log, md5)
+    };
+
+    let (r, want) = render("ref", &[("FS_ENGINE", "reference")]);
+    assert_eq!(r.exit, exit::OK, "{:?}", r.errors);
+    let want = want.expect("reference frames");
+
+    for (name, env) in [
+        ("mock", vec![("FS_ENGINE", "mock")]),
+        (
+            "mock3",
+            vec![("FS_ENGINE", "mock"), ("FS_MOCK_IN_FLIGHT", "3")],
+        ),
+        // 128 px tiles + 4 px context each side = 136 > 100: OOM, the tile
+        // halves to 64 (72 ≤ 100) and the frame is retried.
+        (
+            "mock-oom",
+            vec![("FS_ENGINE", "mock"), ("FS_MOCK_OOM_ABOVE", "100")],
+        ),
+    ] {
+        let (log, got) = render(name, &env);
+        assert_eq!(log.exit, exit::OK, "{name}: {:?}", log.errors);
+        assert_eq!(log.finished, r.finished, "{name}");
+        assert_eq!(got.as_ref(), Some(&want), "{name}: frames differ");
+        let stats = log.engine.expect("engine stats in progress");
+        assert_eq!(stats.backend, Some(fs_types::BackendKind::Mock));
+        let reduced = log
+            .warnings
+            .iter()
+            .any(|(c, _)| *c == fs_types::WarningCode::TileReduced);
+        assert_eq!(reduced, name == "mock-oom", "{name}: {:?}", log.warnings);
+        if name == "mock-oom" {
+            assert_eq!(stats.tile, Some(64));
+        }
+    }
+
+    let (lost, _) = render(
+        "mock-lost",
+        &[("FS_ENGINE", "mock"), ("FS_MOCK_LOST_AFTER", "10")],
+    );
+    assert_eq!(lost.exit, exit::DEVICE_LOST, "{:?}", lost.errors);
+    assert!(lost.committed.is_empty() || lost.committed.len() < r.committed.len());
 }

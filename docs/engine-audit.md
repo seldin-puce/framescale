@@ -1,8 +1,7 @@
 # Engine audit: the inference path today, and an interface for native backends
 
-Status: **proposal, waiting for approval** (Step 1). Nothing in the code has
-changed for this document. File and line references are to `main` at
-`81d9fe9`.
+Status: Step 1 (this audit) approved; **Step 2 implemented** (section 10).
+Sections 1–5 describe the code as it was at `81d9fe9`, before Step 2.
 
 ## 1. How inference runs today
 
@@ -474,9 +473,8 @@ with Apple and TensorRT candidates.
 - Overrides: `NCNN_SRC=<dir>` (another source tree) or `NCNN_DIR=<prefix>`
   (a prebuilt install with `include/ncnn` and `lib`).
 - First build: ncnn plus glslang take about a minute on 12 threads.
-- `cargo check --features backend-ncnn` doesn't work yet, because the feature
-  doesn't exist; today's name is `ncnn`. The alias is step 1 of the migration
-  plan (section 7).
+- Feature: `backend-ncnn` (worker default), an alias of the older `ncnn`,
+  which CI and `cfg(feature = "ncnn")` still use.
 
 ### Comparison with realesrgan-ncnn-vulkan
 
@@ -512,3 +510,50 @@ passes when, for every case:
   scale or offset. 35 dB is an RMS of 4.6 levels, below upstream's own
   measured 38.3 dB deviation from FP32, with margin for GPUs whose FP16
   arithmetic rounds differently.
+
+## 10. Step 2: what was implemented
+
+| Plan step | Where | Notes |
+|---|---|---|
+| 1. Types and features | `fs-engine/src/engine.rs`; `fs-types` `BackendKind`, `EngineStats`; `EnginePlan::backend`; features `backend-ncnn` (default, = `ncnn`), `backend-tensorrt`, `backend-apple` in `fs-engine` and `fs-worker` | Worker protocol 1 → 2 (`Progress.engine`, `EnginePlan.backend`). |
+| 2. Tiler on `NetEngine` | `planar::run_tiled` | Keeps `max_in_flight` tiles submitted, stitches in completion order, reuse and errors as before. `tiled`, `tiled_into`, `tiled_into_even` and `*_reusing` keep their signatures and run through a scoped `ThreadedEngine`. |
+| 3. ncnn on `NetEngine` | `ncnn.rs`: `Sr::new`, `Naf::new`, `Cugan::new` | Long-lived `ThreadedEngine` per network (2 slots on a GPU, `cpu_workers` on CPU). Real-CUGAN's statistics travel as side inputs. RIFE and Face Fix stay direct calls. A panicking network call becomes `EngineError::Internal` instead of hanging the frame. |
+| 4. Selection | `fs-worker/src/backend.rs` | `FS_ENGINE` > `EnginePlan::backend` > Apple → TensorRT (NVIDIA device + `libloading` probe) → ncnn. Fallback with a `BackendFallback` warning. The last candidate's error is fatal. `libloading` is only compiled with `backend-tensorrt`. |
+| 5. Mock | `fs-engine/src/mock.rs`, `FS_ENGINE=mock` | LIFO completion, in-flight count, OOM and device-loss injection (`FS_MOCK_*`). The e2e test runs the real worker with it. |
+| 6. Telemetry | `Progress.engine` → `JobProgress.engine` → `Telemetry.engine` | Backend, tile, max in flight, reused-tile share. TS types regenerated; the HUD doesn't show them yet. |
+
+Verification:
+- `cargo fmt --check`, `cargo clippy -D warnings` (workspace, and `fs-worker`
+  with no features, each backend feature alone, and all of them).
+- 162 workspace tests, plus `ncnn_models` on the RX 9070 XT.
+- New tests:
+  - `engine`: owned and scoped threads, panics become errors;
+  - `mock`: scale 1/2/4 × RGB24/RGB48 × 1/2/5 in flight with edge tiles,
+    equal to the reference, reuse re-runs nothing; out-of-order completion
+    and slots filled; OOM and device loss drain the engine;
+  - `backend`: candidates, opening;
+  - e2e: the real worker with `FS_ENGINE=mock` produces the reference's
+    frames (framemd5) with 2 and 3 in flight and after an injected OOM (the
+    tile halves 128 → 64), and exits `DEVICE_LOST` on an injected device
+    loss.
+- **Bit-identical output**: 12 pipelines on 8 frames, compared with
+  `enhance_image` before Step 2 against after:
+  - General v3 ×2, ×3, ×2 at denoise 0.8, ×2 without reuse;
+  - x4plus ×2 and ×4;
+  - NAFNet + x2plus;
+  - Real-CUGAN SE + AnimeVideo v3, Real-CUGAN Pro + AnimeVideo v3 ×3;
+  - Face Fix;
+  - the CPU path with General v3, and with NAFNet + AnimeVideo v3.
+
+  All 12 MD5s are unchanged, and the run time is the same (54.1 s against
+  54.3 s).
+
+`unimplemented!` (only compiled with their features, which are off by default):
+- `fs-worker/src/backend.rs` `open(BackendKind::Apple)`: the Core ML backend.
+- `fs-worker/src/backend.rs` `open(BackendKind::TensorRt)`: the TensorRT backend.
+
+Unverified:
+- The TensorRT and CUDA library names in the probe. `nvinfer_10` is from
+  NVIDIA's install guide; 11 and the CUDA runtimes follow the same pattern.
+  There's no NVIDIA runtime here to check them against.
+- The device-loss check (section 9) on a real device loss.

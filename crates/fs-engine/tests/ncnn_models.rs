@@ -35,6 +35,7 @@ fn plan(stages: Vec<StageConfig>, models: &std::path::Path) -> EnginePlan {
                 .into(),
         ),
         tile_cache: None,
+        backend: None,
     }
 }
 
