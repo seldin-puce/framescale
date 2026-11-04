@@ -65,6 +65,8 @@ public:
 private:
     void index_gaps();
     void load_weight_bytes(rust::Slice<const uint8_t> bin, const std::string& what);
+    // A failed run: "device lost" when the GPU is gone, else ncnn's code.
+    [[noreturn]] void fail_run(const char* what, int ret) const;
     // Weights loaded from memory (4-byte aligned); outlives `net_`.
     std::vector<uint32_t> weights_;
     std::unique_ptr<ncnn::Net> net_;

@@ -341,6 +341,24 @@ int32_t g_gpu_count = -1;
     throw std::runtime_error(std::string(what) + " failed (ncnn " + std::to_string(ret) + ")");
 }
 
+// A lost device (TDR reset, driver crash) makes ncnn's submit_and_wait return
+// -1 like any other failure. Ask the driver: creating or polling a fresh
+// fence reports VK_ERROR_DEVICE_LOST once the device is gone. Neither call
+// touches a queue, so it's safe while other threads still hold one.
+bool device_lost(int gpu) {
+    ncnn::VulkanDevice* d = ncnn::get_gpu_device(gpu);
+    if (!d) return false;
+    VkFenceCreateInfo ci = {};
+    ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence{};
+    VkResult r = ncnn::vkCreateFence(d->vkdevice(), &ci, nullptr, &fence);
+    if (r == VK_ERROR_DEVICE_LOST) return true;
+    if (r != VK_SUCCESS) return false;
+    r = ncnn::vkGetFenceStatus(d->vkdevice(), fence);
+    ncnn::vkDestroyFence(d->vkdevice(), fence, nullptr);
+    return r == VK_ERROR_DEVICE_LOST;
+}
+
 ncnn::Mat wrap_planar(const float* data, int w, int h, int c) {
     // ncnn channel stride is aligned; copy plane by plane.
     ncnn::Mat m(w, h, c);
@@ -407,6 +425,13 @@ Model::Model(int32_t gpu, bool fp16, int32_t threads) : net_(new ncnn::Net), gpu
 }
 
 Model::~Model() { net_->clear(); }
+
+void Model::fail_run(const char* what, int ret) const {
+    // Rust maps "device lost" to EngineError::DeviceLost (the core then
+    // restarts the worker with smaller tiles) and "(ncnn -100)" to VRAM OOM.
+    if (gpu_ >= 0 && device_lost(gpu_)) throw std::runtime_error(std::string(what) + " failed: GPU device lost");
+    fail(what, ret);
+}
 
 void Model::load(rust::Str param, rust::Str bin) {
     std::string p(param.data(), param.size()), b(bin.data(), bin.size());
@@ -475,7 +500,7 @@ rust::Vec<float> Model::cugan_stats(rust::Slice<const float> input, int32_t w, i
     for (const std::string& g : gaps_) {
         ncnn::Mat m;
         r = ex.extract(g.c_str(), m);
-        if (r != 0) fail(("extract " + g).c_str(), r);
+        if (r != 0) fail_run(("extract " + g).c_str(), r);
         if (m.dims != 1)
             throw std::runtime_error("cugan_stats: " + g + " has " + std::to_string(m.dims) + " dims, expected 1");
         const float* p = static_cast<const float*>(m.data);
@@ -505,7 +530,7 @@ rust::Vec<float> Model::run_outputs(rust::Slice<const float> input, int32_t w, i
         if (index < 0) break;
         ncnn::Mat m;
         r = ex.extract(index, m);
-        if (r != 0) fail(("extract " + name).c_str(), r);
+        if (r != 0) fail_run(("extract " + name).c_str(), r);
         for (int q = 0; q < m.c; q++) {
             const float* p = m.channel(q);
             for (int k = 0; k < m.w * m.h; k++) out.push_back(p[k]);
@@ -531,7 +556,7 @@ void Model::run_codeformer(const Model& generator, rust::Slice<const float> inpu
     for (int i = 0; i < 4 && r == 0; i++) r = enc.extract(feats[i], f[i]);
     if (r == 0) r = enc.extract("lq_feat", lq);
     if (r == 0) r = enc.extract("soft_one_hot", probs);
-    if (r != 0) fail("encoder extract", r);
+    if (r != 0) fail_run("encoder extract", r);
     if (probs.dims != 2) throw std::runtime_error("run_codeformer: unexpected code logits shape");
     // Each token takes its most likely codebook entry (one-hot rows).
     ncnn::Mat onehot(probs.w, probs.h);
@@ -548,7 +573,7 @@ void Model::run_codeformer(const Model& generator, rust::Slice<const float> inpu
     if (generator.net_->output_indexes().empty()) throw std::runtime_error("run_codeformer: generator has no output");
     ncnn::Mat out;
     r = gen.extract(generator.net_->output_indexes()[0], out);
-    if (r != 0) fail("generator extract", r);
+    if (r != 0) fail_run("generator extract", r);
     unwrap_planar(out, output.data(), S, S, 3);
 }
 
@@ -571,7 +596,7 @@ void Model::run_cugan(rust::Slice<const float> input, int32_t w, int32_t h, rust
     if (r != 0) fail("input", r);
     ncnn::Mat out;
     r = ex.extract("out0", out);
-    if (r != 0) fail("extract", r);
+    if (r != 0) fail_run("extract", r);
     unwrap_planar(out, output.data(), out_w, out_h, 3);
 }
 
@@ -584,7 +609,7 @@ void Model::run_sr(rust::Slice<const float> input, int32_t w, int32_t h, rust::S
     if (r != 0) fail("input", r);
     ncnn::Mat out;
     r = ex.extract("output", out);
-    if (r != 0) fail("extract", r);
+    if (r != 0) fail_run("extract", r);
     unwrap_planar(out, output.data(), out_w, out_h, 3);
 }
 
@@ -601,7 +626,7 @@ void Model::run_rife(rust::Slice<const float> a, rust::Slice<const float> b, int
     if (r != 0) fail("input", r);
     ncnn::Mat out;
     r = ex.extract("out0", out);
-    if (r != 0) fail("extract", r);
+    if (r != 0) fail_run("extract", r);
     unwrap_planar(out, output.data(), w, h, 3);
 }
 
