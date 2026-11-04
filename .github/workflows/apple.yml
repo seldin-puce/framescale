@@ -1,0 +1,106 @@
+name: Apple backend
+
+# Builds and checks the Core ML backend (crates/fs-engine/src/apple.rs), which
+# only compiles on macOS, converts General v3 with scripts/convert_coreml.py,
+# and compares Core ML with ncnn on the same frames. The runner is a VM:
+# its numbers check correctness, not speed. The uploaded bundle runs the same
+# comparison on a real Mac (README inside).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [apple-backend]
+    paths:
+      - crates/fs-engine/**
+      - crates/fs-worker/src/backend.rs
+      - scripts/convert_coreml.py
+      - .github/workflows/apple.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coreml:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install   # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v6
+        with:
+          path: .cache/downloads
+          key: downloads-${{ hashFiles('third_party/manifest.toml') }}
+      - run: cargo xtask ncnn
+
+      - name: Check and lint the Core ML backend
+        run: |
+          cargo check -p fs-engine -p fs-worker --all-targets --features fs-engine/backend-apple,fs-worker/backend-apple
+          cargo clippy -p fs-engine -p fs-worker --all-targets \
+            --features fs-engine/ncnn,fs-engine/backend-apple,fs-worker/backend-apple -- -D warnings
+          cargo test -p fs-engine --features backend-apple --lib
+          cargo test -p fs-worker --features backend-apple --bin fs-worker
+
+      - name: Models (ncnn, and the .pth checkpoints)
+        run: cargo xtask models
+
+      - name: Convert General v3 ×2 to Core ML
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q torch coremltools numpy
+          mkdir -p apps/desktop/src-tauri/resources/models/coreml
+          "$RUNNER_TEMP/venv/bin/python" scripts/convert_coreml.py \
+            --general .cache/downloads/*-realesr-general-x4v3.pth \
+            --wdn .cache/downloads/*-realesr-general-wdn-x4v3.pth \
+            --scale 2 --tile 256 --pad 10 \
+            --out apps/desktop/src-tauri/resources/models/coreml/realesr-general-x4v3-dn0.50-x2-t256-p10.mlpackage
+
+      - name: Test frames
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" - <<'EOF'
+          import numpy as np
+          w, h, n = 1280, 720, 8
+          y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+          frames = []
+          for i in range(n):  # texture, edges and gradients, moving a little
+              r = 0.5 + 0.5 * np.sin((x + 3 * i) / 23.0) * np.cos(y / 41.0)
+              g = (((x + 5 * i) // 40 + y // 40) % 2) * 0.7 + 0.15
+              b = (x / w * 0.6 + y / h * 0.4 + 0.02 * i) % 1.0
+              rng = np.random.default_rng(i)
+              img = np.stack([r, g, b], -1) + rng.normal(0, 0.02, (h, w, 3))
+              frames.append(np.clip(np.round(img * 255), 0, 255).astype(np.uint8))
+          np.stack(frames).tofile("frames.rgb")
+          EOF
+
+      - name: Compare Core ML with ncnn
+        run: |
+          cargo build --release -p fs-engine --features ncnn,backend-apple --example coreml_compare
+          ./target/release/examples/coreml_compare frames.rgb 1280 720 | tee comparison.txt
+
+      - name: Bundle for a real Mac
+        run: |
+          B=coreml-compare
+          mkdir -p $B/models/realesrgan/models $B/models/coreml
+          cp target/release/examples/coreml_compare frames.rgb comparison.txt $B/
+          cp apps/desktop/src-tauri/resources/models/realesrgan/models/realesr-general*x4v3.* $B/models/realesrgan/models/
+          cp -R apps/desktop/src-tauri/resources/models/coreml/*.mlpackage $B/models/coreml/
+          cat > $B/run.sh <<'EOF'
+          #!/bin/sh
+          # Core ML vs ncnn (MoltenVK from the installed app, if there is one).
+          cd "$(dirname "$0")"
+          MVK="/Applications/FrameScale AI.app/Contents/Frameworks/libMoltenVK.dylib"
+          [ -f "$MVK" ] && export FS_VULKAN_DRIVER="$MVK"
+          FS_MODELS="$PWD/models" ./coreml_compare frames.rgb 1280 720
+          EOF
+          chmod +x $B/run.sh
+          printf '%s\n' \
+            'Unzip, then in Terminal:' \
+            '  xattr -dr com.apple.quarantine coreml-compare' \
+            '  ./coreml-compare/run.sh' \
+            'comparison.txt has the CI runner'"'"'s numbers (a VM: no Neural Engine).' > $B/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coreml-compare
+          path: coreml-compare

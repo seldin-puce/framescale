@@ -5,7 +5,8 @@
 //! Apple (Apple Silicon, `backend-apple`) → TensorRT (NVIDIA device and the
 //! TensorRT runtime installed, `backend-tensorrt`) → ncnn (`backend-ncnn`:
 //! Vulkan, or ncnn's CPU path). A backend that fails to open hands over to
-//! the next with a warning. The last one's error is fatal: there is never a
+//! the next, with a warning (a log line when it merely has no model for this
+//! pipeline yet). The last one's error is fatal: there is never a
 //! silent downgrade to the non-AI reference. The reference only runs when
 //! asked for, or in a build without any inference backend (as before).
 
@@ -86,10 +87,23 @@ pub fn open(
             }
         }
         BackendKind::Apple => {
-            if cfg!(feature = "backend-apple") {
-                unimplemented!("Core ML backend: not written yet (docs/engine-audit.md, section 7)")
+            #[cfg(all(
+                feature = "backend-apple",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            {
+                fs_engine::apple::AppleBackend::new(plan)
+                    .map(|b| Box::new(b) as Box<dyn InferenceBackend>)
             }
-            missing("Core ML")
+            #[cfg(not(all(
+                feature = "backend-apple",
+                target_os = "macos",
+                target_arch = "aarch64"
+            )))]
+            {
+                missing("Core ML")
+            }
         }
         BackendKind::TensorRt => {
             if cfg!(feature = "backend-tensorrt") {
@@ -121,6 +135,11 @@ pub fn select(plan: &EnginePlan, emit: &Emitter) -> Result<Box<dyn InferenceBack
         }
         match open(kind, plan) {
             Ok(b) => return Ok(b),
+            // Expected (no model for this pipeline on that backend yet): a
+            // log line, not a warning in the UI.
+            Err(EngineError::Unsupported(why)) if i < last => {
+                eprintln!("fs-worker: {kind:?} backend skipped: {why}");
+            }
             Err(e) if i < last => emit.send(&WorkerEvent::Warning {
                 code: WarningCode::BackendFallback,
                 message: format!("{kind:?} backend unavailable ({e}); trying the next one"),
@@ -265,11 +284,12 @@ mod tests {
             open(BackendKind::Reference, &p).expect("ref").name(),
             "cpu-reference"
         );
-        if !cfg!(feature = "backend-apple") {
-            assert!(matches!(
-                open(BackendKind::Apple, &p),
-                Err(EngineError::Unsupported(_))
-            ));
-        }
+        // Without the feature (or off Apple Silicon) there's no Core ML; with
+        // it, there's no Core ML model for this plan's network. Either way the
+        // next backend takes over.
+        assert!(matches!(
+            open(BackendKind::Apple, &p),
+            Err(EngineError::Unsupported(_))
+        ));
     }
 }

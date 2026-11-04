@@ -17,7 +17,17 @@ backend-ncnn = ["ncnn"]
 # Not implemented yet (docs/engine-audit.md): reserved so selection can
 # already be built and tested.
 backend-tensorrt = []
-backend-apple = []
+# Core ML on Apple Silicon (crates/fs-engine/src/apple.rs). The bindings are
+# macOS-only dependencies, so the feature is a no-op elsewhere.
+backend-apple = [
+    "dep:block2",
+    "dep:objc2",
+    "dep:objc2-core-foundation",
+    "dep:objc2-core-ml",
+    "dep:objc2-core-video",
+    "dep:objc2-foundation",
+    "dep:objc2-metal",
+]
 
 [dependencies]
 tracing = { workspace = true }
@@ -25,6 +35,15 @@ fs-types    = { workspace = true }
 thiserror   = { workspace = true }
 xxhash-rust = { workspace = true }
 cxx         = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2                = { workspace = true, optional = true }
+objc2                 = { workspace = true, optional = true }
+objc2-core-foundation = { workspace = true, optional = true }
+objc2-core-ml         = { workspace = true, optional = true }
+objc2-core-video      = { workspace = true, optional = true }
+objc2-foundation      = { workspace = true, optional = true }
+objc2-metal           = { workspace = true, optional = true }
 
 [build-dependencies]
 cxx-build = { workspace = true, optional = true }
@@ -40,3 +59,7 @@ required-features = ["ncnn"]
 [[example]]
 name = "enhance_image"
 required-features = ["ncnn"]
+
+[[example]]
+name = "coreml_compare"
+required-features = ["ncnn", "backend-apple"]

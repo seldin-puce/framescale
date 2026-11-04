@@ -20,14 +20,23 @@
 //!   (`FS_ENGINE=mock`); equals the reference pixel for pixel.
 //! - [`ncnn`] (feature `ncnn`, alias `backend-ncnn`): Vulkan inference
 //!   everywhere (MoltenVK on macOS), with ncnn's CPU path as a fallback.
-//! - Core ML (`backend-apple`) and TensorRT (`backend-tensorrt`): not
-//!   implemented yet; docs/engine-audit.md has the plan.
+//! - [`apple`] (feature `backend-apple`, macOS on Apple Silicon): Core ML for
+//!   the pipelines a converted model exists for (scripts/convert_coreml.py).
+//! - TensorRT (`backend-tensorrt`): not implemented yet; docs/engine-audit.md
+//!   has the plan.
 #![deny(unsafe_code)]
 
+#[cfg(all(
+    feature = "backend-apple",
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub mod apple;
 pub mod cpu;
 pub mod engine;
 pub mod face;
 pub mod frame;
+pub mod half;
 pub mod interp;
 pub mod mock;
 #[cfg(feature = "ncnn")]

@@ -59,6 +59,13 @@ directories        = "6.0.0"
 
 # --- hardware -----------------------------------------------------------------
 ash          = { version = "0.38.0", default-features = false, features = ["std", "loaded", "debug"] }
+block2 = "0.6.2"             # Core ML completion handlers (feature `backend-apple`, macOS)
+objc2 = "0.6.5"
+objc2-core-foundation = "0.3.2"
+objc2-core-ml = "0.3.2"
+objc2-core-video = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-metal = "0.3.2"
 libloading = "0.8.9"        # TensorRT/CUDA probe (feature `backend-tensorrt`): dlopen only, never linked
 nvml-wrapper = "0.13.0"   # dlopen()s libnvidia-ml at runtime: no link-time NVIDIA dependency
 sysinfo      = "0.40.1"

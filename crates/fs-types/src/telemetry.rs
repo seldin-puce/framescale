@@ -111,6 +111,10 @@ pub struct EngineStats {
     /// sampler reports board-level VRAM).
     #[ts(type = "number | null")]
     pub vram_used: Option<u64>,
+    /// How much device memory the engine should stay under (Metal's
+    /// `recommendedMaxWorkingSetSize` on Apple Silicon).
+    #[ts(type = "number | null")]
+    pub vram_budget: Option<u64>,
     /// GPU load as the engine sees it, where it can tell.
     pub gpu_load_pct: Option<f32>,
     /// Share of tiles carried over unchanged from the previous frame.
