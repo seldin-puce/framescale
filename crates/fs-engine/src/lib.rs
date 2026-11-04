@@ -68,8 +68,14 @@ pub trait InferenceBackend: Send {
         t: f32,
         tile: u32,
     ) -> Result<Frame, EngineError>;
-    /// Largest tile worth trying on this device (start point for auto-tune).
+    /// Default tile for this device and these models; the start point for
+    /// [`tiling::TileTuner`].
     fn max_tile(&self) -> u32 {
         512
+    }
+    /// What a tuned tile size depends on (device and model architectures),
+    /// as a key for remembering it. `None`: don't tune (CPU, reference).
+    fn tune_profile(&self) -> Option<String> {
+        None
     }
 }

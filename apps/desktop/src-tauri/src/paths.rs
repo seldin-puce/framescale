@@ -12,6 +12,8 @@ pub struct Paths {
     pub models: PathBuf,
     /// Models downloaded on demand (CodeFormer), `<app data>/models`.
     pub downloads: PathBuf,
+    /// Tile sizes the worker tuned per GPU and models.
+    pub tile_cache: PathBuf,
     pub journal: PathBuf,
     pub ledger: PathBuf,
     pub settings: PathBuf,
@@ -48,6 +50,7 @@ impl Paths {
             work_root: cache.join("jobs"),
             previews: cache.join("previews"),
             thumbs: cache.join("thumbs"),
+            tile_cache: cache.join("tile-tuning.json"),
         })
     }
 }

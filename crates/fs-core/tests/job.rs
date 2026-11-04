@@ -65,6 +65,7 @@ async fn full_job_with_hard_pause_and_resume() {
         models_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/models"),
         downloads_dir: None,
+        tile_cache: None,
         encoders: EncoderEnv {
             os: Os::current(),
             vendor: None,

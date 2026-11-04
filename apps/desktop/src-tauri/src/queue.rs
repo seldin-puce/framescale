@@ -37,6 +37,7 @@ pub async fn run(app: tauri::AppHandle, state: Arc<AppState>) {
             work_root: state.paths.work_root.clone(),
             models_dir: state.paths.models.clone(),
             downloads_dir: Some(state.paths.downloads.clone()),
+            tile_cache: Some(state.paths.tile_cache.clone()),
             encoders: state.encoder_env(),
             device: state.selected_device(),
             ledger: state.ledger.clone(),

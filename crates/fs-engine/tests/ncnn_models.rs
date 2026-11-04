@@ -34,6 +34,7 @@ fn plan(stages: Vec<StageConfig>, models: &std::path::Path) -> EnginePlan {
                 .to_string_lossy()
                 .into(),
         ),
+        tile_cache: None,
     }
 }
 

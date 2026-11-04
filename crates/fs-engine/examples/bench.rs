@@ -32,6 +32,7 @@ fn plan(stage: StageConfig, models: &std::path::Path) -> EnginePlan {
         tile: None,
         models_dir: models.to_string_lossy().into(),
         downloads_dir: None,
+        tile_cache: None,
     }
 }
 

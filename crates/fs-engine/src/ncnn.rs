@@ -487,6 +487,8 @@ pub struct NcnnBackend {
     rife: Option<Rife>,
     device_name: String,
     max_tile: u32,
+    /// Device and model architectures, the key for a tuned tile size.
+    profile: String,
 }
 
 impl std::fmt::Debug for NcnnBackend {
@@ -657,6 +659,9 @@ impl NcnnBackend {
         let mut face_fix = None;
         let mut rife = None;
         let mut heavy = false;
+        // What the speed of a tile size depends on (strength and fidelity only
+        // pick weights for the same network).
+        let mut nets: Vec<String> = Vec::new();
         for stage in &plan.stages {
             match stage {
                 StageConfig::Deinterlace { .. } => {} // handled by FFmpeg in the decoder
@@ -666,6 +671,7 @@ impl NcnnBackend {
                             "custom denoise models are not supported yet".into(),
                         ));
                     }
+                    nets.push(format!("denoise:{}", model.id));
                     if model.id == "nafnet-sidd" {
                         let dir = models.join("nafnet");
                         denoise = Some(Denoiser::Naf(Naf {
@@ -701,6 +707,7 @@ impl NcnnBackend {
                             model.id
                         )));
                     }
+                    nets.push(format!("face:{}", model.id));
                     face_fix = Some(FaceFix::load(
                         models, downloads, *fidelity, &device, threads,
                     )?);
@@ -717,6 +724,8 @@ impl NcnnBackend {
                     }
                     let (param, bin, native) = resolve_sr(models, &model.id, usize::from(*scale))?;
                     heavy = native == 4 && model.id.starts_with("realesrgan");
+                    let stem = param.file_stem().map(|s| s.to_string_lossy());
+                    nets.push(format!("upscale:{}", stem.unwrap_or_default()));
                     let net = if model.id == GENERAL_V3 {
                         let s = denoise.unwrap_or(GENERAL_V3_DENOISE).clamp(0.0, 1.0);
                         let wdn = bin.with_file_name(format!("{GENERAL_V3_WDN}.bin"));
@@ -758,8 +767,14 @@ impl NcnnBackend {
         // Measured on RX 9070 XT (RADV): small tiles win. With two in-flight
         // tiles the working set stays cache-resident. AnimeVideo-v3 1080p→4K:
         // 512 px 6.9 fps → 256 px 10.8 fps; x4plus: 400 px 1.0 → 192 px 1.27 fps.
-        // A per-device calibration pass can refine this later.
-        let gib = device.vram_bytes.unwrap_or(0) >> 30;
+        // The worker then tunes it per device and models (tiling::TileTuner).
+        // Unknown VRAM (no match in our own Vulkan enumeration) starts at
+        // the normal size: an OOM halves it anyway, while starting small
+        // would cost every frame up to a third more work in tile overlap.
+        let gib = device
+            .vram_bytes
+            .filter(|&b| b > 0)
+            .map_or(u64::MAX, |b| b >> 30);
         let max_tile = match (device.index >= 0, heavy, gib) {
             (false, _, _) => 128,
             (true, true, g) if g >= 4 => 192,
@@ -767,6 +782,7 @@ impl NcnnBackend {
             (true, false, g) if g >= 2 => 256,
             (true, false, _) => 192,
         };
+        let profile = format!("{} | {}", device.name, nets.join(" + "));
         Ok(Self {
             denoise,
             face: face_fix,
@@ -779,6 +795,7 @@ impl NcnnBackend {
             rife,
             device_name: device.name,
             max_tile,
+            profile,
         })
     }
 }
@@ -801,6 +818,10 @@ impl InferenceBackend for NcnnBackend {
 
     fn max_tile(&self) -> u32 {
         self.max_tile
+    }
+
+    fn tune_profile(&self) -> Option<String> {
+        self.gpu.then(|| self.profile.clone())
     }
 
     fn process(&mut self, input: &Frame, tile: u32) -> Result<Frame, EngineError> {
@@ -830,14 +851,14 @@ impl InferenceBackend for NcnnBackend {
             }
             return Ok(planar::to_frame(&img, input.format));
         };
-        let (native, model, align) = (sr.native, &sr.model, sr.align);
+        let (native, target, model, align) = (sr.native, sr.target, &sr.model, sr.align);
         planar::tiled_into(
             &img,
             // Aligned tiles (SR_PAD is even) keep every tile's 2×2 unshuffle
             // grid in phase with the frame's, or neighbours disagree at seams.
             (tile as usize / align * align).max(16),
             SR_PAD,
-            native,
+            target,
             workers,
             &mut self.scratch,
             |t| {
@@ -861,27 +882,28 @@ impl InferenceBackend for NcnnBackend {
                         o.h as i32,
                     )
                     .map_err(|e| map_err(&e, tile))?;
-                Ok(if (w, h) == (t.w, t.h) {
+                let o = if (w, h) == (t.w, t.h) {
                     o
                 } else {
                     o.region(0, 0, t.w * native, t.h * native)
+                };
+                // A native ×4 model asked for ×2 or ×3: area-downscale each
+                // tile here, on the tile's worker, while the GPU runs the
+                // next tile. Whole input pixels map to whole output pixels at
+                // both scales, so this equals downscaling the stitched frame
+                // (which kept the GPU idle for a third of every frame).
+                Ok(if native == target {
+                    o
+                } else {
+                    planar::area_resample(&o, t.w * target, t.h * target)
                 })
             },
         )?;
         // Face Fix works on the final (upscaled) pixels.
-        let frame = if sr.target == native {
-            if let Some(ff) = self.face.as_ref() {
-                self.faces = ff.fix(&mut self.scratch)?;
-            }
-            planar::to_frame(&self.scratch, input.format)
-        } else {
-            let mut out =
-                planar::area_resample(&self.scratch, img.w * sr.target, img.h * sr.target);
-            if let Some(ff) = self.face.as_ref() {
-                self.faces = ff.fix(&mut out)?;
-            }
-            planar::to_frame(&out, input.format)
-        };
+        if let Some(ff) = self.face.as_ref() {
+            self.faces = ff.fix(&mut self.scratch)?;
+        }
+        let frame = planar::to_frame(&self.scratch, input.format);
         Ok(frame)
     }
 

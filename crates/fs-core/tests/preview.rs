@@ -69,6 +69,7 @@ async fn preview_and_thumbnail() {
         models_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/desktop/src-tauri/resources/models"),
         downloads_dir: None,
+        tile_cache: None,
         device: None,
     };
     let m = |id: &str| ModelRef {

@@ -141,6 +141,11 @@ pub struct EnginePlan {
     /// third_party/manifest.toml), in the app's data folder.
     #[serde(default)]
     pub downloads_dir: Option<String>,
+    /// JSON file of tuned tile sizes per device and models (app cache). The
+    /// worker reads it when `tile` is `None`, and tunes and records the size
+    /// when there's no entry yet. `None`: no tuning.
+    #[serde(default)]
+    pub tile_cache: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

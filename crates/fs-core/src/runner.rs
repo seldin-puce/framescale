@@ -37,6 +37,8 @@ pub struct Services {
     pub models_dir: PathBuf,
     /// Models downloaded on demand (CodeFormer).
     pub downloads_dir: Option<PathBuf>,
+    /// Tuned tile sizes per device and models (see `EnginePlan::tile_cache`).
+    pub tile_cache: Option<PathBuf>,
     pub encoders: EncoderEnv,
     pub device: Option<GpuDevice>,
     pub ledger: Arc<Ledger>,
@@ -284,6 +286,7 @@ async fn run_inner(ctx: &mut Ctx<'_>) -> Result<JobState, String> {
                 segment_dir: &segment_dir,
                 models_dir: &ctx.svc.models_dir.to_string_lossy(),
                 downloads_dir: ctx.svc.downloads_dir.as_deref().and_then(|p| p.to_str()),
+                tile_cache: ctx.svc.tile_cache.as_deref().and_then(|p| p.to_str()),
             })
             .map_err(|e| e.to_string())?;
             for (code, msg) in planned.warnings {

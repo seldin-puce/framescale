@@ -11,6 +11,7 @@ mod device;
 mod emit;
 mod ffmpeg;
 mod pipeline;
+mod tune;
 mod writer;
 
 use std::io::BufRead;

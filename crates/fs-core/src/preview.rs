@@ -27,6 +27,8 @@ pub struct PreviewTools {
     pub models_dir: PathBuf,
     /// Models downloaded on demand (CodeFormer).
     pub downloads_dir: Option<PathBuf>,
+    /// Tuned tile sizes per device and models (see `EnginePlan::tile_cache`).
+    pub tile_cache: Option<PathBuf>,
     pub device: Option<GpuDevice>,
 }
 
@@ -107,6 +109,7 @@ pub async fn render(
         segment_dir: &out_dir.to_string_lossy(),
         models_dir: &tools.models_dir.to_string_lossy(),
         downloads_dir: tools.downloads_dir.as_deref().and_then(|p| p.to_str()),
+        tile_cache: tools.tile_cache.as_deref().and_then(|p| p.to_str()),
     })
     .map_err(|e| e.to_string())?
     .plan;

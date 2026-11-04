@@ -373,6 +373,41 @@ mod tests {
         p
     }
 
+    #[test]
+    fn area_downscale_per_tile_equals_the_whole_frame() {
+        // A stand-in native ×4 model (nearest neighbour), asked for ×2 and ×3:
+        // downscaling each padded tile must match downscaling the whole
+        // upscaled frame (what the SR stage did before).
+        let up4 = |t: &Planar| {
+            let mut o = Planar::zeros(t.w * 4, t.h * 4);
+            for c in 0..3 {
+                for y in 0..o.h {
+                    for x in 0..o.w {
+                        o.set(c, x, y, t.at(c, x / 4, y / 4));
+                    }
+                }
+            }
+            o
+        };
+        let img = ramp(37, 23);
+        for target in [2, 3] {
+            let whole = area_resample(&up4(&img), img.w * target, img.h * target);
+            let mut tiled = Planar::zeros(1, 1);
+            tiled_into(&img, 16, 10, target, 2, &mut tiled, |t| {
+                Ok(area_resample(&up4(t), t.w * target, t.h * target))
+            })
+            .expect("tiles");
+            assert_eq!((tiled.w, tiled.h), (whole.w, whole.h));
+            let worst = whole
+                .data
+                .iter()
+                .zip(&tiled.data)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(worst < 1e-5, "×{target}: off by {worst}");
+        }
+    }
+
     /// Nearest-neighbour ×s "network": its receptive field is one pixel, so
     /// tiled output must be *identical* to untiled output.
     fn nn(s: usize) -> impl Fn(&Planar) -> Result<Planar, EngineError> + Sync {

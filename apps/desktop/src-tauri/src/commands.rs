@@ -299,6 +299,7 @@ pub async fn render_preview(
         worker: state.paths.worker.clone(),
         models_dir: state.paths.models.clone(),
         downloads_dir: Some(state.paths.downloads.clone()),
+        tile_cache: Some(state.paths.tile_cache.clone()),
         device: state.selected_device(),
     };
     fs_core::preview::prune(&state.paths.previews, 6);

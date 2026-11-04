@@ -138,9 +138,16 @@ than the 9070 XT, which the default ranking correctly avoids.
   `FS_CPU_TILE_WORKERS=n` (benchmarks).
 - SR pre/post-processing runs on the CPU (u8/u16 ⇄ f32); GPU shaders for it are an
   optimisation for later.
-- Measured on AMD RDNA4 only; NVIDIA/Apple may prefer other tile sizes. A
-  per-device calibration pass (cache best tile per device+model) is the
-  long-term fix.
+- Tile size is tuned per device and models: the first render times the
+  default and its neighbours on real frames (hill climbing, 3 frames each,
+  only sizes whose tile stays well under the 2 s TDR watchdog), and the
+  worker stores the fastest in `<app cache>/tile-tuning.json`
+  (`fs_engine::tiling::TileTuner`, `fs-worker/src/tune.rs`). RX 9070 XT,
+  Real-ESRGAN x4+ at ×2 from 1080p: 256 → 384 px, 1.65 → 1.44 s per frame.
+- A native ×4 model asked for ×2/×3 area-downscales each tile on its worker
+  thread, overlapping the GPU, instead of the whole frame afterwards (which
+  left the GPU idle a third of the time): General v3 1080p ×2 640 → 440 ms
+  per frame on the RX 9070 XT.
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
 - HDR10 *static* metadata: embedded in the bitstream by **x265** (HEVC) and

@@ -154,6 +154,7 @@ fn make_plan(t: &Tools, src: &Path, seg_dir: &Path) -> (RenderPlan, fs_types::Me
         segment_dir: seg_dir.to_str().expect("utf8"),
         models_dir: "",
         downloads_dir: None,
+        tile_cache: None,
     })
     .expect("plan")
     .plan;

@@ -10,12 +10,13 @@
 //! frame's hash becomes segment k's `next_hash` (resume alignment).
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, bounded};
 use fs_engine::interp::{FALLBACK_CUT_THRESHOLD, Scheduler, Synth};
-use fs_engine::tiling::TileController;
+use fs_engine::tiling::{TileController, TileTuner};
 use fs_engine::{EngineError, Frame, InferenceBackend, frame};
 use fs_types::pipeline::StageConfig;
 use fs_types::worker::{RenderPlan, WorkerEvent, WorkerJob, exit};
@@ -70,6 +71,13 @@ impl From<EngineError> for Fatal {
     }
 }
 
+/// Tile tuning in progress, and where its result goes.
+struct Tuning {
+    tuner: TileTuner,
+    profile: String,
+    cache: PathBuf,
+}
+
 pub enum Outcome {
     Finished,
     Stopped { next_segment: u32 },
@@ -81,6 +89,9 @@ struct Run<'a> {
     emit: &'a Emitter,
     backend: Box<dyn InferenceBackend>,
     tiles: TileController,
+    tuning: Option<Tuning>,
+    /// Time inside the last engine call (without the Eco governor's pause).
+    busy: Duration,
     sched: Scheduler,
     writer_tx: crossbeam_channel::Sender<WriterMsg>,
     results: Receiver<WriterResult>,
@@ -104,6 +115,7 @@ impl Run<'_> {
         let t0 = Instant::now();
         let backend = &mut self.backend;
         let (v, outcome) = self.tiles.run(|tile| f(backend.as_mut(), tile))?;
+        self.busy = t0.elapsed();
         if let Some(t) = outcome.reduced_to {
             self.emit.send(&WorkerEvent::Warning {
                 code: WarningCode::TileReduced,
@@ -115,6 +127,35 @@ impl Run<'_> {
             std::thread::sleep(pause);
         }
         Ok(v)
+    }
+
+    /// Feed the tuner the frame just processed at `tile`, and apply its
+    /// choice for the next one. The result is stored once tuning ends.
+    fn tune(&mut self, tile: u32) {
+        let Some(t) = self.tuning.as_mut() else {
+            return;
+        };
+        let oom = self.tiles.tile() < tile;
+        let Some(best) = t.tuner.record(tile, self.busy.as_secs_f64(), oom) else {
+            self.tiles.set(t.tuner.tile());
+            return;
+        };
+        self.tiles.set(best);
+        let times: Vec<String> = t
+            .tuner
+            .timings()
+            .iter()
+            .map(|(tile, s)| format!("{tile}px {s:.3}s"))
+            .collect();
+        eprintln!(
+            "fs-worker: tile tuning for {}: {best}px ({})",
+            t.profile,
+            times.join(", ")
+        );
+        if let Err(e) = crate::tune::store(&t.cache, &t.profile, best) {
+            eprintln!("fs-worker: could not save the tuned tile size: {e}");
+        }
+        self.tuning = None;
     }
 
     fn send_out(&mut self, seg: &mut Seg, frame: Frame) -> Result<(), Fatal> {
@@ -249,11 +290,35 @@ fn select_backend(plan: &RenderPlan, emit: &Emitter) -> Result<Box<dyn Inference
 pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome, Fatal> {
     let plan = Arc::new(job.plan);
     let backend = select_backend(&plan, emit)?;
+    // The tile: as planned (a retry after a GPU fault), else as tuned earlier
+    // for this device and these models, else tuned on this run's first frames
+    // starting from the backend's default.
     let max_tile = backend.max_tile();
+    let profile = backend.tune_profile();
+    let cache = plan.engine.tile_cache.as_deref().map(PathBuf::from);
+    let mut tuning = None;
+    let tile = match (plan.engine.tile, profile, cache) {
+        (Some(t), _, _) => t,
+        (None, Some(profile), Some(cache)) => match crate::tune::lookup(&cache, &profile) {
+            Some(t) => t,
+            None => {
+                let px = u64::from(plan.engine.in_width) * u64::from(plan.engine.in_height);
+                let tuner = TileTuner::new(max_tile, px);
+                let t = tuner.tile();
+                tuning = Some(Tuning {
+                    tuner,
+                    profile,
+                    cache,
+                });
+                t
+            }
+        },
+        _ => max_tile,
+    };
     emit.send(&WorkerEvent::Ready {
         backend: backend.name().into(),
         device_name: backend.device_name(),
-        tile: plan.engine.tile.or(Some(max_tile)),
+        tile: Some(tile),
     });
 
     let factor = plan
@@ -353,7 +418,9 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
         ctrl: ctrl.clone(),
         emit,
         backend,
-        tiles: TileController::new(plan.engine.tile.unwrap_or(max_tile)),
+        tiles: TileController::new(tile),
+        tuning,
+        busy: Duration::ZERO,
         sched: Scheduler::new(factor, plan.engine.scene_cuts.iter().copied()),
         writer_tx,
         results: res_rx,
@@ -391,7 +458,9 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
                     Fatal::new(FailureKind::Internal, format!("preview encoder: {e}"))
                 })?;
             }
+            let tile = r.tiles.tile();
             let processed = r.engine(|b, tile| b.process(&raw, tile))?;
+            r.tune(tile);
             let cur_seg = r.seg_of(n);
 
             if let Some(p) = prev.take() {

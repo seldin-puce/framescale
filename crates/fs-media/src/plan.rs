@@ -37,6 +37,8 @@ pub struct PlanInputs<'a> {
     pub models_dir: &'a str,
     /// Models downloaded on demand (see `EnginePlan::downloads_dir`).
     pub downloads_dir: Option<&'a str>,
+    /// Tuned tile sizes (see `EnginePlan::tile_cache`).
+    pub tile_cache: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +204,7 @@ pub fn compile(i: &PlanInputs<'_>) -> Result<Planned, PlanError> {
             tile: None,
             models_dir,
             downloads_dir: i.downloads_dir.map(str::to_owned),
+            tile_cache: i.tile_cache.map(str::to_owned),
         },
         total_frames,
         segment_frames: rate::segment_frames(conform, SEGMENT_SECONDS),
@@ -305,6 +308,7 @@ mod tests {
             segment_dir: "/tmp/seg",
             models_dir: "/models",
             downloads_dir: None,
+            tile_cache: None,
         })
         .expect("plan")
         .plan;
