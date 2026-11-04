@@ -669,5 +669,17 @@ a real Mac, using the installed app's MoltenVK for ncnn when there is one.
     38–49 dB against FP32.
   - 53.7 dB is the same network within FP16 rounding. Below 45 dB something
     systematic would be off: weights, blend, pooling, layout.
-- **Throughput on Apple Silicon**: still to be measured on a real Mac with
-  the uploaded `coreml-compare` bundle (`run.sh`).
+- **Throughput on Apple Silicon** (MacBook Air, Apple M4, the uploaded
+  `coreml-compare` bundle; ncnn through the installed app's MoltenVK),
+  8 frames of 1280×720, General v3 ×2:
+
+  | backend | fps | vs ncnn | PSNR vs ncnn |
+  |---|---|---|---|
+  | ncnn on the GPU (MoltenVK), tile 256 | 1.05 | 1× | — |
+  | Core ML, CPU+GPU | 1.48 | 1.4× | 60.06 dB |
+  | Core ML, all units (picks the Neural Engine) | 2.91 | **2.8×** | 58.99 dB |
+  | Core ML, CPU+Neural Engine | 2.92 | 2.8× | 58.99 dB |
+
+  On the same GPU Core ML is 1.4× faster than ncnn through MoltenVK. With
+  the Neural Engine it's 2.8× faster. "All units" picks the Neural Engine by
+  itself, and the output is within FP16 rounding of ncnn's.
