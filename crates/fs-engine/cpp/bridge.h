@@ -30,6 +30,8 @@ public:
     // Param from a file, weights from memory (e.g. a blend of two checkpoints).
     // The model keeps its own copy: ncnn may reference it for its lifetime.
     void load_weights(rust::Str param, rust::Slice<const uint8_t> bin);
+    // Both: param text, weights from memory.
+    void load_text_weights(rust::Str param_text, rust::Slice<const uint8_t> bin);
 
     // Super-resolution: planar RGB [3][h][w] in 0–1 → planar [3][out_h][out_w].
     void run_sr(rust::Slice<const float> input, int32_t w, int32_t h,
@@ -62,6 +64,7 @@ public:
 
 private:
     void index_gaps();
+    void load_weight_bytes(rust::Slice<const uint8_t> bin, const std::string& what);
     // Weights loaded from memory (4-byte aligned); outlives `net_`.
     std::vector<uint32_t> weights_;
     std::unique_ptr<ncnn::Net> net_;

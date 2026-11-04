@@ -144,10 +144,13 @@ than the 9070 XT, which the default ranking correctly avoids.
   worker stores the fastest in `<app cache>/tile-tuning.json`
   (`fs_engine::tiling::TileTuner`, `fs-worker/src/tune.rs`). RX 9070 XT,
   Real-ESRGAN x4+ at ×2 from 1080p: 256 → 384 px, 1.65 → 1.44 s per frame.
-- A native ×4 model asked for ×2/×3 area-downscales each tile on its worker
-  thread, overlapping the GPU, instead of the whole frame afterwards (which
-  left the GPU idle a third of the time): General v3 1080p ×2 640 → 440 ms
-  per frame on the RX 9070 XT.
+- A native ×4 model asked for ×2 gets a 2×2 average pooling appended to its
+  graph at load time (`pool_output`): the exact area downscale, on the GPU,
+  so a quarter of the data comes back and the CPU has nothing to resample.
+  ×3 area-downscales each tile on its worker thread, overlapping the GPU.
+  Before, the whole ×4 frame was resampled single-threaded afterwards, with
+  the GPU idle a third of the time. General v3 ×2 on the RX 9070 XT: 1080p
+  640 → 380 ms per frame, 720p 5.1 → 5.9 fps from per-tile to pooled.
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
 - HDR10 *static* metadata: embedded in the bitstream by **x265** (HEVC) and

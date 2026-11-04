@@ -40,6 +40,7 @@ mod ffi {
         fn load(self: Pin<&mut Model>, param: &str, bin: &str) -> Result<()>;
         fn load_text(self: Pin<&mut Model>, param_text: &str, bin: &str) -> Result<()>;
         fn load_weights(self: Pin<&mut Model>, param: &str, bin: &[u8]) -> Result<()>;
+        fn load_text_weights(self: Pin<&mut Model>, param_text: &str, bin: &[u8]) -> Result<()>;
         fn run_outputs(
             self: &Model,
             input: &[f32],
@@ -598,9 +599,8 @@ fn load_blended(
     device: &DeviceSel,
     threads: i32,
     param: &Path,
-    a: &Path,
-    b: &Path,
-    s: f32,
+    (a, b, s): (&Path, &Path, f32),
+    pool: usize,
 ) -> Result<UniquePtr<ffi::Model>, EngineError> {
     let read = |p: &Path| {
         std::fs::read(p).map_err(|e| EngineError::ModelNotFound(format!("{}: {e}", p.display())))
@@ -611,10 +611,84 @@ fn load_blended(
     let weights = dni(&read(a)?, &read(b)?, s)?;
     let fp16 = device.index >= 0;
     let mut m = ffi::model_new(device.index, fp16, threads).map_err(|e| map_err(&e, 0))?;
+    let loaded = if pool > 1 {
+        let text = pooled_param(param, pool)?;
+        m.pin_mut().load_text_weights(&text, &weights)
+    } else {
+        m.pin_mut().load_weights(&param.to_string_lossy(), &weights)
+    };
+    loaded.map_err(|e| EngineError::ModelNotFound(e.what().to_owned()))?;
+    Ok(m)
+}
+
+/// An SR model whose output is average-pooled by `pool` on the GPU (see
+/// [`pool_output`]); `pool` 1 loads it as is.
+fn load_sr(
+    device: &DeviceSel,
+    threads: i32,
+    param: &Path,
+    bin: &Path,
+    pool: usize,
+) -> Result<UniquePtr<ffi::Model>, EngineError> {
+    if pool == 1 {
+        return load(device, threads, param, bin);
+    }
+    if !bin.exists() {
+        return Err(EngineError::ModelNotFound(bin.display().to_string()));
+    }
+    let text = pooled_param(param, pool)?;
+    let fp16 = device.index >= 0;
+    let mut m = ffi::model_new(device.index, fp16, threads).map_err(|e| map_err(&e, 0))?;
     m.pin_mut()
-        .load_weights(&param.to_string_lossy(), &weights)
+        .load_text(&text, &bin.to_string_lossy())
         .map_err(|e| EngineError::ModelNotFound(e.what().to_owned()))?;
     Ok(m)
+}
+
+fn pooled_param(param: &Path, pool: usize) -> Result<String, EngineError> {
+    let text = std::fs::read_to_string(param)
+        .map_err(|e| EngineError::ModelNotFound(format!("{}: {e}", param.display())))?;
+    pool_output(&text, pool).ok_or_else(|| {
+        EngineError::Internal(format!("{}: no single `output` blob", param.display()))
+    })
+}
+
+/// Rename an SR graph's `output` blob and append a `pool`×`pool` average
+/// pooling that produces `output` again. For a native ×4 network asked for
+/// ×2 that's the exact area downscale, done on the GPU: a quarter of the data
+/// comes back to the CPU and nothing is left to resample there.
+fn pool_output(param: &str, pool: usize) -> Option<String> {
+    let mut lines: Vec<String> = param.lines().map(str::to_owned).collect();
+    let mut counts = lines.get(1)?.split_whitespace().map(str::parse::<usize>);
+    let (layers, blobs) = (counts.next()?.ok()?, counts.next()?.ok()?);
+    let mut renamed = 0;
+    for line in lines.iter_mut().skip(2) {
+        let mut t: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
+        let (Some(nb), Some(nt)) = (
+            t.get(2).and_then(|v| v.parse::<usize>().ok()),
+            t.get(3).and_then(|v| v.parse::<usize>().ok()),
+        ) else {
+            continue;
+        };
+        if t.get(4..4 + nb)?.iter().any(|b| b == "output") {
+            return None; // `output` feeds another layer: not the final blob
+        }
+        let tops = t.get_mut(4 + nb..4 + nb + nt)?;
+        if let Some(top) = tops.iter_mut().find(|b| *b == "output") {
+            *top = "output_native".into();
+            renamed += 1;
+            *line = t.join(" ");
+        }
+    }
+    if renamed != 1 {
+        return None;
+    }
+    lines[1] = format!("{} {}", layers + 1, blobs + 1);
+    // 0=1 average, 1/2 kernel and stride, 5=1 valid (no padding).
+    lines.push(format!(
+        "Pooling fs_area_downscale 1 1 output_native output 0=1 1={pool} 2={pool} 5=1"
+    ));
+    Some(lines.join("\n") + "\n")
 }
 
 fn load(
@@ -722,21 +796,25 @@ impl NcnnBackend {
                             "custom upscale models are not supported yet".into(),
                         ));
                     }
-                    let (param, bin, native) = resolve_sr(models, &model.id, usize::from(*scale))?;
+                    let target = usize::from(*scale);
+                    let (param, bin, native) = resolve_sr(models, &model.id, target)?;
                     heavy = native == 4 && model.id.starts_with("realesrgan");
+                    // A ×4 network asked for ×2 averages 2×2 on the GPU
+                    // (exact area downscale); ×3 resamples per tile on the CPU.
+                    let pool = if native == 2 * target { 2 } else { 1 };
                     let stem = param.file_stem().map(|s| s.to_string_lossy());
-                    nets.push(format!("upscale:{}", stem.unwrap_or_default()));
+                    nets.push(format!("upscale:{}:x{target}", stem.unwrap_or_default()));
                     let net = if model.id == GENERAL_V3 {
                         let s = denoise.unwrap_or(GENERAL_V3_DENOISE).clamp(0.0, 1.0);
                         let wdn = bin.with_file_name(format!("{GENERAL_V3_WDN}.bin"));
-                        load_blended(&device, threads, &param, &bin, &wdn, s)?
+                        load_blended(&device, threads, &param, (&bin, &wdn, s), pool)?
                     } else {
-                        load(&device, threads, &param, &bin)?
+                        load_sr(&device, threads, &param, &bin, pool)?
                     };
                     sr = Some(Sr {
                         model: net,
-                        native,
-                        target: usize::from(*scale),
+                        native: native / pool,
+                        target,
                         align: if param.ends_with(format!("{X2PLUS}.param")) {
                             2
                         } else {
@@ -887,11 +965,12 @@ impl InferenceBackend for NcnnBackend {
                 } else {
                     o.region(0, 0, t.w * native, t.h * native)
                 };
-                // A native ×4 model asked for ×2 or ×3: area-downscale each
-                // tile here, on the tile's worker, while the GPU runs the
-                // next tile. Whole input pixels map to whole output pixels at
-                // both scales, so this equals downscaling the stitched frame
-                // (which kept the GPU idle for a third of every frame).
+                // A native ×4 model asked for ×3 (×2 pools on the GPU):
+                // area-downscale each tile here, on the tile's worker, while
+                // the GPU runs the next tile. Whole input pixels map to whole
+                // output pixels at both scales, so this equals downscaling
+                // the stitched frame (which kept the GPU idle for a third of
+                // every frame).
                 Ok(if native == target {
                     o
                 } else {
@@ -961,6 +1040,26 @@ mod tests {
             "fp16 bins can't be blended byte-wise"
         );
         assert!(dni(&a, &b[..8], 0.5).is_err(), "layouts must match");
+    }
+
+    #[test]
+    fn pools_the_output_blob() {
+        let param = "7767517\n3 4\nInput input 0 1 data\nConvolution conv 1 1 data up 0=48\n\
+                     BinaryOp add 2 1 up data output 0=0\n";
+        let p = pool_output(param, 2).expect("pooled");
+        let lines: Vec<&str> = p.lines().collect();
+        assert_eq!(lines[1], "4 5");
+        assert_eq!(lines[4], "BinaryOp add 2 1 up data output_native 0=0");
+        assert_eq!(
+            lines[5],
+            "Pooling fs_area_downscale 1 1 output_native output 0=1 1=2 2=2 5=1"
+        );
+        assert!(pool_output("7767517\n1 1\nInput input 0 1 data\n", 2).is_none());
+        let feeds = "7767517\n2 2\nInput input 0 1 output\nReLU r 1 1 output out2\n";
+        assert!(
+            pool_output(feeds, 2).is_none(),
+            "`output` isn't final there"
+        );
     }
 
     #[test]

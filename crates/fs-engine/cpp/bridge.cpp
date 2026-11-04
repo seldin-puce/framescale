@@ -421,12 +421,23 @@ void Model::load_weights(rust::Str param, rust::Slice<const uint8_t> bin) {
     std::string p(param.data(), param.size());
     int r = net_->load_param(p.c_str());
     if (r != 0) fail(("load_param " + p).c_str(), r);
+    load_weight_bytes(bin, p);
+}
+
+void Model::load_text_weights(rust::Str param_text, rust::Slice<const uint8_t> bin) {
+    std::string p(param_text.data(), param_text.size());
+    int r = net_->load_param_mem(p.c_str());
+    if (r != 0) fail("load_param (text)", r);
+    load_weight_bytes(bin, "param text");
+}
+
+void Model::load_weight_bytes(rust::Slice<const uint8_t> bin, const std::string& what) {
     weights_.assign((bin.size() + 3) / 4, 0);
     std::memcpy(weights_.data(), bin.data(), bin.size());
     const size_t used = net_->load_model(reinterpret_cast<const unsigned char*>(weights_.data()));
     if (used != bin.size())
         throw std::runtime_error("load_model: used " + std::to_string(used) + " of " + std::to_string(bin.size()) +
-                                 " weight bytes (" + p + ")");
+                                 " weight bytes (" + what + ")");
 }
 
 void Model::load_text(rust::Str param_text, rust::Str bin) {

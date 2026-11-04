@@ -245,12 +245,23 @@ fn upscale(
     denoise: Option<f32>,
     src: &Frame,
 ) -> Frame {
+    upscale_by(models, dev, id, 4, denoise, src)
+}
+
+fn upscale_by(
+    models: &std::path::Path,
+    dev: &DeviceSel,
+    id: &str,
+    scale: u8,
+    denoise: Option<f32>,
+    src: &Frame,
+) -> Frame {
     let stage = StageConfig::Upscale {
         model: ModelRef {
             id: id.into(),
             path: None,
         },
-        scale: 4,
+        scale,
         denoise,
     };
     let mut b = NcnnBackend::new(&plan(vec![stage], models), dev.clone(), 4)
@@ -290,6 +301,36 @@ fn check_general_v3(dev: &DeviceSel, models: &std::path::Path) {
         d_strong <= d_mid && d_mid <= d_keep,
         "default 0.5 sits between: {d_mid}"
     );
+    // ×2 averages the ×4 output 2×2 inside the network, on the device: the
+    // same as area-downscaling the ×4 frame afterwards. The ×4 frame here is
+    // already clamped to 0–255 (the network isn't), so compare where none of
+    // the four source pixels was clipped.
+    let x2 = upscale_by(models, dev, "realesr-general-x4v3", 2, Some(0.5), &clean);
+    assert_eq!((x2.width, x2.height), (128, 96));
+    let (mut worst, mut compared) = (0u8, 0usize);
+    for y in 0..96usize {
+        for x in 0..128usize {
+            for c in 0..3 {
+                let px = |xx: usize, yy: usize| reference.data[(yy * 256 + xx) * 3 + c];
+                let block = [
+                    px(2 * x, 2 * y),
+                    px(2 * x + 1, 2 * y),
+                    px(2 * x, 2 * y + 1),
+                    px(2 * x + 1, 2 * y + 1),
+                ];
+                if block.iter().any(|&v| v == 0 || v == 255) {
+                    continue;
+                }
+                let want = block.iter().map(|&v| f32::from(v)).sum::<f32>() / 4.0;
+                let got = x2.data[(y * 128 + x) * 3 + c];
+                worst = worst.max((f32::from(got) - want).abs().round() as u8);
+                compared += 1;
+            }
+        }
+    }
+    eprintln!("   general v3 ×2 pooled on the device: max |Δ| {worst} over {compared} values");
+    assert!(compared > 128 * 96, "most of the frame isn't clipped");
+    assert!(worst <= 2, "pooled ×2 matches the area downscale");
     // Colours: the upscale keeps the picture's mean.
     let mean = |f: &Frame| f.data.iter().map(|v| f32::from(*v)).sum::<f32>() / f.data.len() as f32;
     assert!(
