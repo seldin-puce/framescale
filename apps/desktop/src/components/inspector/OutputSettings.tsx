@@ -62,7 +62,8 @@ export function OutputSettings() {
           <span>Quality</span>
           <span className="tabular font-mono">{output.quality <= 16 ? "Archival" : output.quality <= 22 ? "High" : output.quality <= 28 ? "Balanced" : "Small"} · CQ {output.quality}</span>
         </span>
-        <input type="range" min={12} max={34} value={output.quality} onChange={(e) => setOutput({ quality: Number(e.target.value) })} className="accent-accent" />
+        {/* CQ: lower is better, so the slider runs reversed (higher quality to the right). */}
+        <input type="range" min={12} max={34} value={46 - output.quality} onChange={(e) => setOutput({ quality: 46 - Number(e.target.value) })} aria-label="Quality" className="accent-accent" />
       </label>
       <SaveTo />
       <Tooltip label="Primaries, transfer (incl. PQ/HLG), matrix and range are carried from source to output. Audio is copied bit-exact.">
