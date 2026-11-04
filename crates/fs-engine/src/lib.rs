@@ -78,4 +78,11 @@ pub trait InferenceBackend: Send {
     fn tune_profile(&self) -> Option<String> {
         None
     }
+    /// Carry unchanged tiles over from the previous frame (on by default
+    /// where supported). Off while tile sizes are being timed.
+    fn set_reuse(&mut self, _on: bool) {}
+    /// One line about the run so far, for the log.
+    fn report(&self) -> Option<String> {
+        None
+    }
 }

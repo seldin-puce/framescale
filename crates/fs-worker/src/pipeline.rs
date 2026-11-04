@@ -156,6 +156,7 @@ impl Run<'_> {
             eprintln!("fs-worker: could not save the tuned tile size: {e}");
         }
         self.tuning = None;
+        self.backend.set_reuse(true);
     }
 
     fn send_out(&mut self, seg: &mut Seg, frame: Frame) -> Result<(), Fatal> {
@@ -289,7 +290,7 @@ fn select_backend(plan: &RenderPlan, emit: &Emitter) -> Result<Box<dyn Inference
 
 pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome, Fatal> {
     let plan = Arc::new(job.plan);
-    let backend = select_backend(&plan, emit)?;
+    let mut backend = select_backend(&plan, emit)?;
     // The tile: as planned (a retry after a GPU fault), else as tuned earlier
     // for this device and these models, else tuned on this run's first frames
     // starting from the backend's default.
@@ -315,6 +316,8 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
         },
         _ => max_tile,
     };
+    // Reused tiles would make the timed frames faster for the wrong reason.
+    backend.set_reuse(tuning.is_none());
     emit.send(&WorkerEvent::Ready {
         backend: backend.name().into(),
         device_name: backend.device_name(),
@@ -522,6 +525,9 @@ pub fn run(job: WorkerJob, ctrl: Arc<Control>, emit: &Emitter) -> Result<Outcome
                 format!("preview encoder failed: {why}"),
             ));
         }
+    }
+    if let Some(line) = r.backend.report() {
+        eprintln!("fs-worker: {line}");
     }
     let Run {
         emit: emitter,

@@ -181,7 +181,97 @@ pub fn tiled_into(
     run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<(), EngineError> {
     let tile = tile.max(16);
-    tiled_grid(img, (tile, tile), pad, scale, workers, out, run)
+    tiled_grid(img, (tile, tile), pad, scale, workers, out, None, run)
+}
+
+/// Largest change (0–1 scale, any pixel, any channel) in a tile's input,
+/// context included, for its previous output to be kept: under one 8-bit
+/// level, so a kept tile is what the network would produce to within
+/// rounding. Exactly unchanged input (static shots, screen recordings,
+/// skipped blocks in compressed video) gives the same output bit for bit.
+pub const REUSE_MAX_DIFF: f32 = 1.0 / 255.0;
+
+/// What a tiled stage last computed, tile by tile, across frames: the input
+/// each tile's current output came from. [`tiled_into_reusing`] skips tiles
+/// whose input hasn't changed and leaves their previous output in place.
+#[derive(Debug, Default)]
+pub struct TileMemory {
+    /// Image size, tile size, pad and scale the inputs belong to.
+    key: (usize, usize, usize, usize, usize, usize),
+    inputs: Vec<Option<Planar>>,
+    /// Tiles seen and tiles reused, since creation.
+    pub tiles: u64,
+    pub reused: u64,
+}
+
+impl TileMemory {
+    /// Forget every tile (the output buffer can't be trusted any more).
+    pub fn clear(&mut self) {
+        self.inputs.clear();
+    }
+}
+
+/// [`tiled_into`] that only runs tiles whose padded input changed by more
+/// than [`REUSE_MAX_DIFF`] since `memory` last ran them. `out` must hold the
+/// previous result and not be touched in between; any change of size, tile
+/// or scale starts over. Returns the number of tiles reused.
+#[allow(clippy::too_many_arguments)]
+pub fn tiled_into_reusing(
+    img: &Planar,
+    tile: usize,
+    pad: usize,
+    scale: usize,
+    workers: usize,
+    out: &mut Planar,
+    memory: &mut TileMemory,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
+) -> Result<usize, EngineError> {
+    let tile = tile.max(16);
+    let before = memory.reused;
+    tiled_grid(
+        img,
+        (tile, tile),
+        pad,
+        scale,
+        workers,
+        out,
+        Some(memory),
+        run,
+    )?;
+    Ok((memory.reused - before) as usize)
+}
+
+/// [`tiled_into_reusing`] over [`tiled_into_even`]'s grid.
+#[allow(clippy::too_many_arguments)]
+pub fn tiled_into_even_reusing(
+    img: &Planar,
+    tile: usize,
+    pad: usize,
+    scale: usize,
+    workers: usize,
+    out: &mut Planar,
+    memory: &mut TileMemory,
+    run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
+) -> Result<usize, EngineError> {
+    let before = memory.reused;
+    let grid = even_grid(img, tile);
+    tiled_grid(img, grid, pad, scale, workers, out, Some(memory), run)?;
+    Ok((memory.reused - before) as usize)
+}
+
+fn even_grid(img: &Planar, tile: usize) -> (usize, usize) {
+    let tile = tile.max(16);
+    let even = |n: usize| n.div_ceil(n.div_ceil(tile)).max(1);
+    (even(img.w), even(img.h))
+}
+
+/// Whether `a` and `b` differ nowhere by more than `limit`.
+fn within(a: &Planar, b: &Planar, limit: f32) -> bool {
+    (a.w, a.h) == (b.w, b.h)
+        && a.data
+            .iter()
+            .zip(&b.data)
+            .all(|(x, y)| (x - y).abs() <= limit)
 }
 
 /// [`tiled_into`] with the frame split into equal tiles of at most `tile` px
@@ -197,19 +287,25 @@ pub fn tiled_into_even(
     out: &mut Planar,
     run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<(), EngineError> {
-    let tile = tile.max(16);
-    let even = |n: usize| n.div_ceil(n.div_ceil(tile)).max(1);
     tiled_grid(
         img,
-        (even(img.w), even(img.h)),
+        even_grid(img, tile),
         pad,
         scale,
         workers,
         out,
+        None,
         run,
     )
 }
 
+/// A finished tile: its output, and the input to remember for reuse.
+enum Done {
+    Ran(usize, Planar, Option<Planar>),
+    Reused,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn tiled_grid(
     img: &Planar,
     (tw, th): (usize, usize),
@@ -217,24 +313,37 @@ fn tiled_grid(
     scale: usize,
     workers: usize,
     out: &mut Planar,
+    mut memory: Option<&mut TileMemory>,
     run: impl Fn(&Planar) -> Result<Planar, EngineError> + Sync,
 ) -> Result<(), EngineError> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     if (out.w, out.h) != (img.w * scale, img.h * scale) {
         *out = Planar::zeros(img.w * scale, img.h * scale);
+        if let Some(m) = memory.as_deref_mut() {
+            m.clear();
+        }
     }
     let tiles: Vec<(usize, usize, usize, usize)> = (0..img.h)
         .step_by(th)
         .flat_map(|ty| (0..img.w).step_by(tw).map(move |tx| (tx, ty)))
         .map(|(tx, ty)| (tx, ty, tw.min(img.w - tx), th.min(img.h - ty)))
         .collect();
+    if let Some(m) = memory.as_deref_mut() {
+        let key = (img.w, img.h, tw, th, pad, scale);
+        if m.key != key || m.inputs.len() != tiles.len() {
+            m.key = key;
+            m.inputs = vec![None; tiles.len()];
+        }
+    }
+    let remember = memory.is_some();
+    let previous: &[Option<Planar>] = memory.as_deref().map_or(&[], |m| &m.inputs);
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
     let (tx_res, rx_res) =
-        std::sync::mpsc::sync_channel::<Result<(usize, Planar), EngineError>>(workers.max(1));
+        std::sync::mpsc::sync_channel::<Result<Done, EngineError>>(workers.max(1));
 
-    std::thread::scope(|s| {
+    let (result, learned, reused) = std::thread::scope(|s| {
         for _ in 0..workers.max(1) {
             let (next, stop, tiles, run, tx_res) = (&next, &stop, &tiles, &run, tx_res.clone());
             s.spawn(move || {
@@ -250,16 +359,24 @@ fn tiled_grid(
                         w + 2 * pad,
                         h + 2 * pad,
                     );
-                    let r = run(&input).and_then(|res| {
-                        if res.w == input.w * scale && res.h == input.h * scale {
-                            Ok((i, res))
-                        } else {
-                            Err(EngineError::Internal(format!(
-                                "model returned {}×{} for a {}×{} tile at ×{scale}",
-                                res.w, res.h, input.w, input.h
-                            )))
-                        }
-                    });
+                    let unchanged = previous
+                        .get(i)
+                        .and_then(Option::as_ref)
+                        .is_some_and(|p| within(p, &input, REUSE_MAX_DIFF));
+                    let r = if unchanged {
+                        Ok(Done::Reused)
+                    } else {
+                        run(&input).and_then(|res| {
+                            if res.w == input.w * scale && res.h == input.h * scale {
+                                Ok(Done::Ran(i, res, remember.then_some(input)))
+                            } else {
+                                Err(EngineError::Internal(format!(
+                                    "model returned {}×{} for a {}×{} tile at ×{scale}",
+                                    res.w, res.h, input.w, input.h
+                                )))
+                            }
+                        })
+                    };
                     if r.is_err() {
                         stop.store(true, Ordering::Relaxed);
                     }
@@ -272,9 +389,11 @@ fn tiled_grid(
         drop(tx_res);
         // Stitch on this thread as results arrive (blits are disjoint).
         let mut first_err = None;
+        let mut learned = Vec::new();
+        let mut reused = 0u64;
         for r in rx_res {
             match r {
-                Ok((i, res)) if first_err.is_none() => {
+                Ok(Done::Ran(i, res, input)) if first_err.is_none() => {
                     let (x, y, w, h) = tiles[i];
                     let interior = Rect {
                         x: pad * scale,
@@ -283,7 +402,11 @@ fn tiled_grid(
                         h: h * scale,
                     };
                     out.blit(&res, interior, x * scale, y * scale);
+                    if let Some(input) = input {
+                        learned.push((i, input));
+                    }
                 }
+                Ok(Done::Reused) => reused += 1,
                 Ok(_) => {}
                 Err(e) => {
                     stop.store(true, Ordering::Relaxed);
@@ -291,8 +414,21 @@ fn tiled_grid(
                 }
             }
         }
-        first_err.map_or(Ok(()), Err)
-    })
+        (first_err.map_or(Ok(()), Err), learned, reused)
+    });
+    if let Some(m) = memory {
+        if result.is_err() {
+            // Part of `out` may be stale: start over next time.
+            m.clear();
+        } else {
+            for (i, input) in learned {
+                m.inputs[i] = Some(input);
+            }
+            m.tiles += tiles.len() as u64;
+            m.reused += reused;
+        }
+    }
+    result
 }
 
 /// Exact area-average resample for downscaling by any ratio ≥ 1, e.g. a
@@ -371,6 +507,67 @@ mod tests {
             }
         }
         p
+    }
+
+    #[test]
+    fn reuses_unchanged_tiles_and_reruns_changed_ones() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // A ×2 "network" with a context-dependent result (local mean), so a
+        // tile that missed a change in its padding would show it.
+        let net = |t: &Planar| {
+            let mut o = Planar::zeros(t.w * 2, t.h * 2);
+            for c in 0..3 {
+                for y in 0..o.h {
+                    for x in 0..o.w {
+                        let (sx, sy) = (x / 2, y / 2);
+                        let l = t.at(c, sx.saturating_sub(1), sy);
+                        let r = t.at(c, (sx + 1).min(t.w - 1), sy);
+                        o.set(c, x, y, (l + t.at(c, sx, sy) + r) / 3.0);
+                    }
+                }
+            }
+            o
+        };
+        let runs = AtomicUsize::new(0);
+        let counted = |t: &Planar| {
+            runs.fetch_add(1, Ordering::Relaxed);
+            Ok(net(t))
+        };
+        let fresh = |img: &Planar| tiled(img, 16, 4, 2, |t| Ok(net(t))).expect("tiles");
+
+        let mut img = ramp(50, 40); // 4 × 3 = 12 tiles
+        let (mut out, mut mem) = (Planar::zeros(1, 1), TileMemory::default());
+        let n = tiled_into_reusing(&img, 16, 4, 2, 2, &mut out, &mut mem, counted).expect("a");
+        assert_eq!((n, runs.swap(0, Ordering::Relaxed)), (0, 12));
+        assert_eq!(out, fresh(&img));
+
+        // Same frame: nothing runs, the output stays.
+        let n = tiled_into_reusing(&img, 16, 4, 2, 2, &mut out, &mut mem, counted).expect("b");
+        assert_eq!((n, runs.swap(0, Ordering::Relaxed)), (12, 0));
+        assert_eq!(out, fresh(&img));
+
+        // A sub-level change is kept; a real one reruns the tiles whose
+        // padded input contains it: (17, 5) sits in tile (16, 0) and in the
+        // 4 px padding of tile (0, 0).
+        img.set(1, 30, 30, img.at(1, 30, 30) + 0.5 / 255.0);
+        let n = tiled_into_reusing(&img, 16, 4, 2, 2, &mut out, &mut mem, counted).expect("c");
+        assert_eq!((n, runs.swap(0, Ordering::Relaxed)), (12, 0));
+        img.set(0, 17, 5, 0.1);
+        let n = tiled_into_reusing(&img, 16, 4, 2, 2, &mut out, &mut mem, counted).expect("d");
+        assert_eq!((n, runs.swap(0, Ordering::Relaxed)), (10, 2));
+        let worst = out
+            .data
+            .iter()
+            .zip(&fresh(&img).data)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(worst <= REUSE_MAX_DIFF, "off by {worst}");
+
+        // Another tile size starts over.
+        let n = tiled_into_reusing(&img, 24, 4, 2, 2, &mut out, &mut mem, counted).expect("e");
+        assert_eq!((n, runs.swap(0, Ordering::Relaxed)), (0, 6));
+        assert_eq!(out, tiled(&img, 24, 4, 2, |t| Ok(net(t))).expect("tiles"));
+        assert_eq!((mem.tiles, mem.reused), (12 * 4 + 6, 34));
     }
 
     #[test]

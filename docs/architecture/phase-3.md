@@ -151,6 +151,18 @@ than the 9070 XT, which the default ranking correctly avoids.
   Before, the whole ×4 frame was resampled single-threaded afterwards, with
   the GPU idle a third of the time. General v3 ×2 on the RX 9070 XT: 1080p
   640 → 380 ms per frame, 720p 5.1 → 5.9 fps from per-tile to pooled.
+- Unchanged tiles are reused across frames (`planar::TileMemory`): a tile
+  whose padded input moved by at most 1/255 anywhere keeps its previous
+  output (upscale, and NAFNet denoise, whose tiles depend only on their own
+  input; Real-CUGAN uses whole-frame statistics and always runs). Off while
+  tile sizes are being tuned; `FS_TILE_REUSE=0` turns it off. 720p H.264
+  with a static background and a moving inset, General v3 ×2: 5.9 → 30.6 fps
+  (84% of tiles reused), output PSNR 67 dB against computing every tile.
+  Full motion and temporal noise reuse nothing and cost nothing measurable.
+- Keeping data on the GPU between denoise and upscale was measured first and
+  not done: NAFNet + x2plus at SD keeps the RX 9070 XT 97% busy (median)
+  with 24, 4 or 2 CPU cores alike, at the same 2.41 fps, so the transfers
+  already overlap GPU work.
 - **2 s preview rendering** + `fs://` protocol, and real **thumbnails**: the
   viewport shows a labelled procedural sample until then.
 - HDR10 *static* metadata: embedded in the bitstream by **x265** (HEVC) and

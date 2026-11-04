@@ -282,11 +282,12 @@ impl Naf {
         tile: u32,
         workers: usize,
         scratch: &mut Planar,
+        memory: Option<&mut planar::TileMemory>,
     ) -> Result<Planar, EngineError> {
         // Twice the SR tile (it still halves with the controller on OOM),
         // split evenly: each tile's channel attention then sees a similar area.
         let size = tile as usize * 2;
-        planar::tiled_into_even(img, size, NAF_PAD, 1, workers, scratch, |t| {
+        let run = |t: &Planar| {
             let p = planar::pad_to_multiple(t, NAF_ALIGN);
             let mut o = Planar::zeros(p.w, p.h);
             self.model
@@ -310,7 +311,15 @@ impl Naf {
                 }
             }
             Ok(o)
-        })?;
+        };
+        // A NAFNet tile depends only on its padded input (its attention
+        // averages within the tile), so unchanged tiles can keep their output.
+        match memory {
+            Some(m) => {
+                planar::tiled_into_even_reusing(img, size, NAF_PAD, 1, workers, scratch, m, run)?;
+            }
+            None => planar::tiled_into_even(img, size, NAF_PAD, 1, workers, scratch, run)?,
+        }
         Ok(scratch.clone())
     }
 }
@@ -322,16 +331,19 @@ enum Denoiser {
 }
 
 impl Denoiser {
+    /// `memory`: reuse unchanged tiles (NAFNet; Real-CUGAN's tiles depend on
+    /// whole-frame statistics, so it always runs).
     fn denoise(
         &self,
         img: &Planar,
         tile: u32,
         workers: usize,
         scratch: &mut Planar,
+        memory: Option<&mut planar::TileMemory>,
     ) -> Result<Planar, EngineError> {
         match self {
             Self::Cugan(c) => c.denoise(img, tile, workers, scratch),
-            Self::Naf(n) => n.denoise(img, tile, workers, scratch),
+            Self::Naf(n) => n.denoise(img, tile, workers, scratch, memory),
         }
     }
 }
@@ -490,6 +502,15 @@ pub struct NcnnBackend {
     max_tile: u32,
     /// Device and model architectures, the key for a tuned tile size.
     profile: String,
+    /// Upscale tiles carried over from the previous frame when unchanged.
+    reuse: bool,
+    sr_memory: planar::TileMemory,
+    dn_memory: planar::TileMemory,
+}
+
+/// `FS_TILE_REUSE=0` turns tile reuse off (comparisons, benchmarks).
+fn reuse_disabled() -> bool {
+    std::env::var("FS_TILE_REUSE").is_ok_and(|v| v == "0")
 }
 
 impl std::fmt::Debug for NcnnBackend {
@@ -874,6 +895,9 @@ impl NcnnBackend {
             device_name: device.name,
             max_tile,
             profile,
+            reuse: !reuse_disabled(),
+            sr_memory: planar::TileMemory::default(),
+            dn_memory: planar::TileMemory::default(),
         })
     }
 }
@@ -921,7 +945,8 @@ impl InferenceBackend for NcnnBackend {
         };
         let mut img = planar::from_frame(input);
         if let Some(dn) = self.denoise.as_ref() {
-            img = dn.denoise(&img, tile, workers, &mut self.dn_scratch)?;
+            let memory = self.reuse.then_some(&mut self.dn_memory);
+            img = dn.denoise(&img, tile, workers, &mut self.dn_scratch, memory)?;
         }
         let Some(sr) = self.sr.as_ref() else {
             if let Some(ff) = self.face.as_ref() {
@@ -930,60 +955,109 @@ impl InferenceBackend for NcnnBackend {
             return Ok(planar::to_frame(&img, input.format));
         };
         let (native, target, model, align) = (sr.native, sr.target, &sr.model, sr.align);
-        planar::tiled_into(
-            &img,
-            // Aligned tiles (SR_PAD is even) keep every tile's 2×2 unshuffle
-            // grid in phase with the frame's, or neighbours disagree at seams.
-            (tile as usize / align * align).max(16),
-            SR_PAD,
-            target,
-            workers,
-            &mut self.scratch,
-            |t| {
-                // Odd frame sizes: repeat the last row/column, crop it after.
-                let (w, h) = (t.w.next_multiple_of(align), t.h.next_multiple_of(align));
-                let padded;
-                let src = if (w, h) == (t.w, t.h) {
-                    t
-                } else {
-                    padded = t.region(0, 0, w, h);
-                    &padded
-                };
-                let mut o = Planar::zeros(w * native, h * native);
-                model
-                    .run_sr(
-                        &src.data,
-                        w as i32,
-                        h as i32,
-                        &mut o.data,
-                        o.w as i32,
-                        o.h as i32,
-                    )
-                    .map_err(|e| map_err(&e, tile))?;
-                let o = if (w, h) == (t.w, t.h) {
-                    o
-                } else {
-                    o.region(0, 0, t.w * native, t.h * native)
-                };
-                // A native ×4 model asked for ×3 (×2 pools on the GPU):
-                // area-downscale each tile here, on the tile's worker, while
-                // the GPU runs the next tile. Whole input pixels map to whole
-                // output pixels at both scales, so this equals downscaling
-                // the stitched frame (which kept the GPU idle for a third of
-                // every frame).
-                Ok(if native == target {
-                    o
-                } else {
-                    planar::area_resample(&o, t.w * target, t.h * target)
-                })
-            },
-        )?;
-        // Face Fix works on the final (upscaled) pixels.
-        if let Some(ff) = self.face.as_ref() {
-            self.faces = ff.fix(&mut self.scratch)?;
+        // Aligned tiles (SR_PAD is even) keep every tile's 2×2 unshuffle
+        // grid in phase with the frame's, or neighbours disagree at seams.
+        let sr_tile = (tile as usize / align * align).max(16);
+        let run = |t: &Planar| {
+            // Odd frame sizes: repeat the last row/column, crop it after.
+            let (w, h) = (t.w.next_multiple_of(align), t.h.next_multiple_of(align));
+            let padded;
+            let src = if (w, h) == (t.w, t.h) {
+                t
+            } else {
+                padded = t.region(0, 0, w, h);
+                &padded
+            };
+            let mut o = Planar::zeros(w * native, h * native);
+            model
+                .run_sr(
+                    &src.data,
+                    w as i32,
+                    h as i32,
+                    &mut o.data,
+                    o.w as i32,
+                    o.h as i32,
+                )
+                .map_err(|e| map_err(&e, tile))?;
+            let o = if (w, h) == (t.w, t.h) {
+                o
+            } else {
+                o.region(0, 0, t.w * native, t.h * native)
+            };
+            // A native ×4 model asked for ×3 (×2 pools on the GPU):
+            // area-downscale each tile here, on the tile's worker, while
+            // the GPU runs the next tile. Whole input pixels map to whole
+            // output pixels at both scales, so this equals downscaling
+            // the stitched frame (which kept the GPU idle for a third of
+            // every frame).
+            Ok(if native == target {
+                o
+            } else {
+                planar::area_resample(&o, t.w * target, t.h * target)
+            })
+        };
+        let (img_ref, scratch) = (&img, &mut self.scratch);
+        if self.reuse {
+            // Tiles whose input (context included) is unchanged since the
+            // last frame keep their output: still parts of a shot cost
+            // nothing.
+            planar::tiled_into_reusing(
+                img_ref,
+                sr_tile,
+                SR_PAD,
+                target,
+                workers,
+                scratch,
+                &mut self.sr_memory,
+                run,
+            )?;
+        } else {
+            planar::tiled_into(img_ref, sr_tile, SR_PAD, target, workers, scratch, run)?;
         }
-        let frame = planar::to_frame(&self.scratch, input.format);
+        // Face Fix works on the final (upscaled) pixels, on a copy when the
+        // output buffer carries reused tiles into the next frame.
+        let frame = match self.face.as_ref() {
+            Some(ff) if self.reuse => {
+                let mut out = self.scratch.clone();
+                self.faces = ff.fix(&mut out)?;
+                planar::to_frame(&out, input.format)
+            }
+            Some(ff) => {
+                self.faces = ff.fix(&mut self.scratch)?;
+                planar::to_frame(&self.scratch, input.format)
+            }
+            None => planar::to_frame(&self.scratch, input.format),
+        };
         Ok(frame)
+    }
+
+    fn set_reuse(&mut self, on: bool) {
+        self.reuse = on && !reuse_disabled();
+        if !self.reuse {
+            self.sr_memory.clear();
+            self.dn_memory.clear();
+        }
+    }
+
+    fn report(&self) -> Option<String> {
+        let line = |what: &str, m: &planar::TileMemory| {
+            (m.tiles > 0).then(|| {
+                format!(
+                    "{what} tiles reused: {} of {} ({:.0}%)",
+                    m.reused,
+                    m.tiles,
+                    100.0 * m.reused as f64 / m.tiles as f64
+                )
+            })
+        };
+        let parts: Vec<String> = [
+            line("denoise", &self.dn_memory),
+            line("upscale", &self.sr_memory),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!parts.is_empty()).then(|| parts.join("; "))
     }
 
     fn interpolate(
