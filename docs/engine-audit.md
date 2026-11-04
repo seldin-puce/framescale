@@ -557,3 +557,87 @@ Unverified:
   NVIDIA's install guide; 11 and the CUDA runtimes follow the same pattern.
   There's no NVIDIA runtime here to check them against.
 - The device-loss check (section 9) on a real device loss.
+
+## 11. Apple Silicon backend (Core ML)
+
+`crates/fs-engine/src/apple.rs`, feature `backend-apple`, compiled on
+`target_os = "macos"` + `target_arch = "aarch64"` only (the `objc2-*`
+bindings are macOS-only dependencies, so the feature is a no-op elsewhere).
+
+### Design
+
+- **`CoreMlEngine`** (`NetEngine`) loads one compiled Core ML program with a
+  fixed `[1, 3, T+2P, T+2P]` FP16 input. `submit` writes the tile into a
+  pixel buffer, wraps it and the output buffer as `MLMultiArray`s and calls
+  `predictionFromFeatures:options:completionHandler:` (asynchronous; two
+  tiles in flight). The completion block only sends the ticket and
+  status over a channel. `wait_any` and `poll` receive from it on the owning
+  thread, so the submit/poll contract holds and nothing but the channel
+  crosses threads.
+- **Memory.** Input and output tensors are IOSurface-backed
+  `kCVPixelFormatType_OneComponent16Half` buffers from two
+  `CVPixelBufferPool`s (`side × 3·side` and `side·S × 3·side·S`, planar
+  channels stacked vertically). `MLMultiArray initWithPixelBuffer:shape:`
+  wraps them without a copy. The output buffer is passed as the
+  prediction's `outputBackings`, so Core ML writes into it directly.
+  The one remaining copy per tile is f32 → FP16 into the input buffer,
+  and FP16 → f32 when the tiler stitches. The tiler's tiles are host
+  `Planar`s, and the frames come from FFmpeg pipes (section 5).
+- **"`FrameStorage::PixelBuffer`".** This codebase has no `FrameStorage`.
+  Its equivalent is `engine::Tensor::Device(Box<dyn DeviceTensor>)` (Step 2),
+  and `PixelBufferTensor` is that variant for Core ML. `to_host` is the
+  fallback the tiler uses.
+- **Compute units**: `MLComputeUnits::All` (Neural Engine and GPU, Core ML
+  picks per layer). `FS_COREML_UNITS=gpu|ane|cpu` overrides for comparisons.
+- **Why not MPSGraph**: it can't load ONNX or a PyTorch export. Every
+  network would have to be rebuilt op by op in Rust, and it can't reach the
+  Neural Engine, which Core ML can. Without a measured advantage it isn't
+  used.
+- **`AppleBackend`** (`InferenceBackend`) accepts a pipeline only when a
+  converted model exists for it: today General v3 ×2 or ×4 at the default
+  denoise (0.5), plus Deinterlace (FFmpeg). Anything else returns
+  `Unsupported`. Selection then falls back to ncnn and only logs it (not a
+  UI warning, since it's expected).
+- **Fixed tile**: the model's shape is fixed (the Neural Engine needs it), so
+  the controller's tile size is ignored. Edge tiles are padded up by
+  repeating their last row and column, and their output is cropped.
+- **Telemetry**: `vram_used` = `MTLDevice.currentAllocatedSize`,
+  `vram_budget` = `recommendedMaxWorkingSetSize` (new `EngineStats` field),
+  `gpu_load_pct` = `None`. macOS has no per-process GPU load; the app's
+  IOKit sampler still shows the system-wide one.
+
+### Model conversion
+
+`scripts/convert_coreml.py` (Python 3.10+, `torch`, `coremltools`, `numpy`;
+runs on Linux too, but prediction needs macOS):
+
+- **Weights.** It rebuilds SRVGGNetCompact in PyTorch from
+  Real-ESRGAN's architecture (BSD-3-Clause), then blends General v3 with
+  its weak-denoise twin at `--denoise` (`s·a + (1−s)·b`, the ncnn
+  backend's DNI).
+- **×2.** For `--scale 2` it appends a 2×2 average pool, the same exact area
+  downscale as ncnn's pooled graph.
+- **Conversion.** `ct.convert(..., convert_to="mlprogram",
+  compute_precision=FLOAT16, minimum_deployment_target=macOS14)`, with
+  FP16 `TensorType` input `input` and output `output`. The fixed shape comes
+  from `--tile` and `--pad`.
+- **File name** encodes the settings, and the backend parses it:
+  `models/coreml/realesr-general-x4v3-dn0.50-x2-t256-p10.mlpackage`
+  (2.4 MB). The model is compiled to `.mlmodelc` at load.
+- **Check.** `--check PREFIX` writes a test image and the PyTorch result for
+  it. PyTorch FP32 vs our ncnn backend on it: **51.1 dB** (GPU), 51.6 dB
+  (CPU). The residue comes from ncnn's tiling of that 276 px image and its
+  FP16 storage, so the conversion is the same network.
+
+### Verification
+
+There's no Mac in the development environment, so `.github/workflows/apple.yml`
+(macOS 15 runner, on pushes to `apple-backend` and on demand) does:
+`cargo check` and `clippy -D warnings` with `backend-apple`, the fs-engine
+and fs-worker tests, the conversion, and `coreml_compare`. That example runs
+General v3 ×2 over 8 frames of 1280×720 with ncnn and then with Core ML for
+each compute-unit setting, and prints fps and the PSNR against ncnn. The
+runner is a VM (no Neural Engine, paravirtualised GPU at best), so its
+numbers check correctness only. The workflow uploads a `coreml-compare`
+bundle (binary, models, frames, `run.sh`) that runs the same comparison on
+a real Mac, using the installed app's MoltenVK for ncnn when there is one.

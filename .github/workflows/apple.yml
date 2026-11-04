@@ -48,7 +48,10 @@ jobs:
 
       - name: Convert General v3 ×2 to Core ML
         run: |
-          python3 -m venv "$RUNNER_TEMP/venv"
+          # coremltools ships its native parts for released Pythons only
+          # (the runner's default python3 can be newer): pin 3.12.
+          brew install python@3.12
+          "$(brew --prefix python@3.12)/bin/python3.12" -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install -q torch coremltools numpy
           mkdir -p apps/desktop/src-tauri/resources/models/coreml
           "$RUNNER_TEMP/venv/bin/python" scripts/convert_coreml.py \
