@@ -49,8 +49,8 @@ mkdir -p "$MNT"
 # asks to accept. Through `curl | bash` nobody can answer, so the attach used
 # to fail and nothing was installed. Answer it ("q" leaves the pager, "y"
 # agrees), as Homebrew does for such images; the GPL needs no acceptance to
-# use the program anyway.
-printf 'qy\n' | hdiutil attach -quiet -nobrowse -readonly -mountpoint "$MNT" "$TMP/FrameScale.dmg" >/dev/null
+# use the program anyway. Not with -quiet: that cancels the agreement.
+printf 'qy\n' | hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$TMP/FrameScale.dmg" >/dev/null
 [ -d "$MNT/$APP" ] || die "the disk image has no $APP"
 if pgrep -xq "FrameScale AI"; then
   say "Closing the running FrameScale AI"

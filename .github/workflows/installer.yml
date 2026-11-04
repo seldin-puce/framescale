@@ -1,5 +1,9 @@
 name: macOS installer
 
+# Runs site/install.sh (the `curl … | bash` installer) on a clean macOS
+# runner against the latest release, the way users run it, and checks the
+# app lands in /Applications.
+
 on:
   workflow_dispatch:
   push:
@@ -11,18 +15,19 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  install:
     runs-on: macos-15
     steps:
-      - name: Ways to attach a DMG with a license agreement
+      - uses: actions/checkout@v7
+      - name: Install through a pipe, as users do
+        env:
+          FRAMESCALE_NO_OPEN: "1"
+        run: cat site/install.sh | bash
+      - name: The app is there and launchable
         run: |
-          set +e
-          URL=$(curl -fsSL https://api.github.com/repos/seldin-puce/framescale/releases/latest | grep -o '"browser_download_url": *"[^"]*_aarch64\.dmg"' | head -n1 | sed 's/.*"\(https[^"]*\)"/\1/')
-          curl -fsSL -o fs.dmg "$URL"; ls -la fs.dmg
-          echo "== imageinfo (SLA?)"; hdiutil imageinfo fs.dmg 2>&1 | grep -i -E "licen|sla|Format:" | head
-          try() { name=$1; shift; mkdir -p "m-$name"; echo "== $name"; "$@" ; rc=$?; echo "rc=$rc"; ls "m-$name" 2>&1 | head -3; hdiutil detach -quiet "m-$name" 2>/dev/null; }
-          try plain sh -c 'hdiutil attach -nobrowse -readonly -mountpoint m-plain fs.dmg </dev/null 2>&1 | tail -5'
-          try qy sh -c "printf 'qy\n' | hdiutil attach -nobrowse -readonly -mountpoint m-qy fs.dmg 2>&1 | tail -5"
-          try yes_pager sh -c 'yes | PAGER=true hdiutil attach -nobrowse -readonly -mountpoint m-yes_pager fs.dmg 2>&1 | tail -5'
-          try y_pager sh -c "printf 'Y\n' | PAGER=true hdiutil attach -nobrowse -readonly -mountpoint m-y_pager fs.dmg 2>&1 | tail -5"
-          try convert sh -c 'hdiutil convert -quiet fs.dmg -format UDTO -o fs-plain && hdiutil attach -nobrowse -readonly -noautoopen -mountpoint m-convert fs-plain.cdr </dev/null 2>&1 | tail -5'
+          test -d "/Applications/FrameScale AI.app"
+          ls "/Applications/FrameScale AI.app/Contents/MacOS/"
+          codesign --verify --deep --strict "/Applications/FrameScale AI.app" && echo "signature ok"
+          if xattr -p com.apple.quarantine "/Applications/FrameScale AI.app" 2>/dev/null; then
+            echo "::error::quarantine flag left on the app"; exit 1
+          fi
