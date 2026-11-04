@@ -73,7 +73,7 @@ of everything GPL inside it:
 `.github/workflows/release.yml` builds Linux (on Ubuntu 22.04, for the glibc baseline), Windows, and macOS arm64 + x86_64, and creates a **draft** GitHub release with every installer. Review it, then publish.
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag -a vX.Y.Z -m "FrameScale AI X.Y.Z" && git push origin vX.Y.Z
 ```
 
 Every secret below is optional; each one switches on a step:
