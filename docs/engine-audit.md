@@ -641,3 +641,33 @@ runner is a VM (no Neural Engine, paravirtualised GPU at best), so its
 numbers check correctness only. The workflow uploads a `coreml-compare`
 bundle (binary, models, frames, `run.sh`) that runs the same comparison on
 a real Mac, using the installed app's MoltenVK for ncnn when there is one.
+
+### Results so far (CI, run 41839820634, macOS 15 VM)
+
+- `cargo check`, `clippy -D warnings` and the tests pass with `backend-apple`
+  on macOS arm64.
+- The conversion runs (needs Python 3.12: coremltools has no native parts for
+  the runner's newer default Python yet).
+- `coreml_compare`, 8 frames of 1280×720, General v3 ×2:
+
+  | backend | fps | PSNR vs ncnn |
+  |---|---|---|
+  | ncnn (CPU path: no Vulkan in the VM), tile 128 | 0.11 | — |
+  | Core ML, all units, tile 256 | 0.14 | 53.73 dB |
+  | Core ML, CPU+GPU | 0.13 | 53.73 dB |
+  | Core ML, CPU+Neural Engine | 0.13 | 53.73 dB |
+
+  The three Core ML settings give identical output and Metal reports 0 MB
+  allocated: the VM has neither a GPU nor a Neural Engine for Core ML, so
+  everything ran on the CPU. These fps say nothing about real hardware.
+- **PSNR threshold: 45 dB** (RMS error ≈ 1.4 of an 8-bit level).
+  - Core ML computes in FP16 (`compute_precision=FLOAT16`); ncnn here
+    computes in FP32.
+  - The tile grids differ (256 against 128) and edge tiles are padded
+    differently.
+  - Section 9 showed FP16 arithmetic alone costing realesrgan-ncnn-vulkan
+    38–49 dB against FP32.
+  - 53.7 dB is the same network within FP16 rounding. Below 45 dB something
+    systematic would be off: weights, blend, pooling, layout.
+- **Throughput on Apple Silicon**: still to be measured on a real Mac with
+  the uploaded `coreml-compare` bundle (`run.sh`).
