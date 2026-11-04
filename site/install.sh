@@ -43,9 +43,14 @@ trap cleanup EXIT
 say "Downloading $(basename "$URL" | sed 's/%20/ /g')"
 curl -fL --progress-bar -o "$TMP/FrameScale.dmg" "$URL"
 
-say "Installing into $DEST"
+say "Installing into $DEST (license: GPL-3.0, https://github.com/$REPO/blob/main/LICENSE)"
 mkdir -p "$MNT"
-hdiutil attach -quiet -nobrowse -readonly -mountpoint "$MNT" "$TMP/FrameScale.dmg"
+# The disk image carries the license as an agreement, which hdiutil shows and
+# asks to accept. Through `curl | bash` nobody can answer, so the attach used
+# to fail and nothing was installed. Answer it ("q" leaves the pager, "y"
+# agrees), as Homebrew does for such images; the GPL needs no acceptance to
+# use the program anyway.
+printf 'qy\n' | hdiutil attach -quiet -nobrowse -readonly -mountpoint "$MNT" "$TMP/FrameScale.dmg" >/dev/null
 [ -d "$MNT/$APP" ] || die "the disk image has no $APP"
 if pgrep -xq "FrameScale AI"; then
   say "Closing the running FrameScale AI"
@@ -61,5 +66,9 @@ $SUDO rm -rf "$DEST/$APP"
 $SUDO ditto "$MNT/$APP" "$DEST/$APP"
 $SUDO xattr -dr com.apple.quarantine "$DEST/$APP" 2>/dev/null || true
 
-say "Done. Opening FrameScale AI"
-open "$DEST/$APP"
+if [ -n "${FRAMESCALE_NO_OPEN:-}" ]; then
+  say "Done: $DEST/$APP"
+else
+  say "Done. Opening FrameScale AI"
+  open "$DEST/$APP"
+fi

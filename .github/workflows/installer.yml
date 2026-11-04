@@ -1,0 +1,33 @@
+name: macOS installer
+
+# Runs site/install.sh (the `curl … | bash` installer) on a clean macOS
+# runner against the latest release, the way users run it, and checks the
+# app lands in /Applications.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - site/install.sh
+      - .github/workflows/installer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install through a pipe, as users do
+        env:
+          FRAMESCALE_NO_OPEN: "1"
+        run: cat site/install.sh | bash
+      - name: The app is there and launchable
+        run: |
+          test -d "/Applications/FrameScale AI.app"
+          ls "/Applications/FrameScale AI.app/Contents/MacOS/"
+          codesign --verify --deep --strict "/Applications/FrameScale AI.app" && echo "signature ok"
+          if xattr -p com.apple.quarantine "/Applications/FrameScale AI.app" 2>/dev/null; then
+            echo "::error::quarantine flag left on the app"; exit 1
+          fi
